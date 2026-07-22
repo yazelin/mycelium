@@ -1,5 +1,6 @@
 'use strict';
 import { getAllRecords, putRecord } from './db.js';
+import { esc } from './util.js';
 
 export async function renderGraphTab(projectId, container) {
   const [entities, relations] = await Promise.all([
@@ -10,8 +11,8 @@ export async function renderGraphTab(projectId, container) {
   container.innerHTML = `
     <section class="relation-form">
       <h2>新增關係</h2>
-      <select id="r-source">${entities.map((e) => `<option value="${e.id}">${e.name}</option>`).join('')}</select>
-      <select id="r-target">${entities.map((e) => `<option value="${e.id}">${e.name}</option>`).join('')}</select>
+      <select id="r-source">${entities.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
+      <select id="r-target">${entities.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <input id="r-type" placeholder="關係類型（敵對/從屬/師徒…）">
       <button id="r-add" type="button">新增</button>
     </section>
