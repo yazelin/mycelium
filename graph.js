@@ -1,5 +1,5 @@
 'use strict';
-import { getAllRecords, putRecord } from './db.js';
+import { getAllRecords, putRecord, deleteRecord } from './db.js';
 import { esc } from './util.js';
 
 export async function renderGraphTab(projectId, container) {
@@ -7,6 +7,15 @@ export async function renderGraphTab(projectId, container) {
     getAllRecords(projectId, 'entities'),
     getAllRecords(projectId, 'relations'),
   ]);
+  const entityById = Object.fromEntries(entities.map((e) => [e.id, e]));
+
+  // Defensive layer: entities.js cascade-deletes relations when their entity
+  // goes away, but this filter is what actually keeps the tab from ever
+  // bricking again — a relation whose source/target entity no longer exists
+  // (from data written before that fix, a manual DB edit, a partial import,
+  // etc.) makes Cytoscape throw synchronously and abort the whole render
+  // below (including the #r-add listener), so it must never reach elements.
+  const validRelations = relations.filter((r) => entityById[r.sourceId] && entityById[r.targetId]);
 
   container.innerHTML = `
     <section class="relation-form">
@@ -17,6 +26,13 @@ export async function renderGraphTab(projectId, container) {
       <button id="r-add" type="button">新增</button>
     </section>
     <div id="cy" style="width:100%;height:500px;border:1px solid #ccc;"></div>
+    <ul class="relation-list">
+      ${relations.map((r) => `
+        <li data-id="${r.id}">
+          <span>${esc((entityById[r.sourceId] || {}).name || '（已刪除）')} —${esc(r.type)}→ ${esc((entityById[r.targetId] || {}).name || '（已刪除）')}</span>
+          <button class="r-delete" type="button">刪除</button>
+        </li>`).join('')}
+    </ul>
   `;
 
   const cyEl = container.querySelector('#cy');
@@ -24,7 +40,7 @@ export async function renderGraphTab(projectId, container) {
     container: cyEl,
     elements: [
       ...entities.map((e) => ({ data: { id: e.id, label: e.name } })),
-      ...relations.map((r) => ({ data: { id: r.id, source: r.sourceId, target: r.targetId, label: r.type } })),
+      ...validRelations.map((r) => ({ data: { id: r.id, source: r.sourceId, target: r.targetId, label: r.type } })),
     ],
     style: [
       { selector: 'node', style: { label: 'data(label)', 'background-color': '#2d4a3e', color: '#fff', 'text-valign': 'center', 'font-size': 12 } },
@@ -46,5 +62,17 @@ export async function renderGraphTab(projectId, container) {
     if (!sourceId || !targetId || !type) return;
     await putRecord(projectId, 'relations', { sourceId, targetId, type });
     renderGraphTab(projectId, container);
+  });
+
+  // Recovery layer: until now there was no way at all to remove a relation
+  // (only entities/chapters/foreshadow had delete buttons) — so a stale or
+  // unwanted relation, dangling or not, could never be cleared from inside
+  // the app.
+  container.querySelectorAll('.r-delete').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.closest('li').dataset.id;
+      await deleteRecord(projectId, 'relations', id);
+      renderGraphTab(projectId, container);
+    });
   });
 }

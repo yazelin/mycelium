@@ -47,7 +47,17 @@ export async function renderEntitiesTab(projectId, container) {
   container.querySelectorAll('.e-delete').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.closest('li').dataset.id;
+      // Root cause of the 關係圖-brick bug: a relation whose source/target
+      // entity no longer exists makes Cytoscape throw and abort renderGraphTab
+      // partway through (see graph.js). Cascade-delete those relations here so
+      // one never gets left behind in the first place, and tell the user
+      // up front — this makes the delete silently take relations with it
+      // otherwise.
+      const relations = await getAllRecords(projectId, 'relations');
+      const affected = relations.filter((r) => r.sourceId === id || r.targetId === id);
+      if (affected.length && !confirm(`這個設定牽涉 ${affected.length} 筆關係，刪除後這些關係也會一併刪除，確定刪除？`)) return;
       await deleteRecord(projectId, 'entities', id);
+      for (const r of affected) await deleteRecord(projectId, 'relations', r.id);
       renderEntitiesTab(projectId, container);
     });
   });
