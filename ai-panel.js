@@ -35,13 +35,21 @@ async function runChatTask(projectId, task, userPrompt, logEl) {
 
 function renderChatControls(projectId, container, logEl) {
   container.innerHTML = `<textarea id="ai-input" placeholder="輸入問題…（一致性檢查/反轉發想留空會用預設問句）"></textarea><button id="ai-send" type="button">送出</button>`;
-  container.querySelector('#ai-send').addEventListener('click', async () => {
+  const sendBtn = container.querySelector('#ai-send');
+  sendBtn.addEventListener('click', async () => {
     const task = document.querySelector('#ai-task').value;
     const input = container.querySelector('#ai-input');
     const prompt = input.value.trim() || DEFAULT_PROMPTS[task] || '';
     if (!prompt) return;
     input.value = '';
-    await runChatTask(projectId, task, prompt, logEl);
+    sendBtn.disabled = true;
+    sendBtn.textContent = '送出中…';
+    try {
+      await runChatTask(projectId, task, prompt, logEl);
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = '送出';
+    }
   });
 }
 

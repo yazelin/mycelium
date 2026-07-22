@@ -106,3 +106,39 @@ test('dangling relations (pointing to non-existent entities) do not appear in AI
   expect(capturedSystemMessage).not.toContain('—從屬→ ?');
   expect(capturedSystemMessage).not.toContain('missing-entity');
 });
+
+test('#ai-send is disabled while a request is pending and re-enabled once it resolves', async ({ page }) => {
+  let resolveChat;
+  const chatGate = new Promise((resolve) => { resolveChat = resolve; });
+  await page.route('**/chat/completions', async (route) => {
+    await chatGate;
+    const body = route.request().postDataJSON();
+    const userMsg = body.messages[body.messages.length - 1].content;
+    await route.fulfill({
+      json: { choices: [{ message: { role: 'assistant', content: `[mock reply to] ${userMsg}` } }] },
+    });
+  });
+
+  const sendBtn = page.locator('#ai-send');
+  await page.locator('#ai-input').fill('林小雨現在幾歲？');
+  await sendBtn.click();
+
+  await expect(sendBtn).toBeDisabled();
+
+  resolveChat();
+  await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply to]');
+  await expect(sendBtn).toBeEnabled();
+});
+
+test('#ai-send is re-enabled after a request that fails', async ({ page }) => {
+  await page.route('**/chat/completions', async (route) => {
+    await route.fulfill({ status: 500, json: { error: { message: '模擬伺服器錯誤' } } });
+  });
+
+  const sendBtn = page.locator('#ai-send');
+  await page.locator('#ai-input').fill('林小雨現在幾歲？');
+  await sendBtn.click();
+
+  await expect(page.locator('.ai-msg.error')).toContainText('模擬伺服器錯誤');
+  await expect(sendBtn).toBeEnabled();
+});
