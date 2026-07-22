@@ -22,14 +22,23 @@ export async function renderChaptersTab(projectId, container) {
     </section>
     <p class="chapter-stats">進度：${CHAPTER_STATUSES.map((s) => `${s} ${counts[s]}`).join('・')}</p>
     <ul class="chapter-list">
-      ${chapters.map((c) => `
+      ${chapters.map((c) => {
+        const hasContent = !!(c.content && c.content.trim());
+        return `
         <li data-id="${c.id}">
           <strong>第${c.volume}卷・${esc(c.title)}</strong>
           <select class="c-status-select">${CHAPTER_STATUSES.map((s) => `<option${s === c.status ? ' selected' : ''}>${s}</option>`).join('')}</select>
           <span class="wordcount">${c.wordCount || 0} 字</span>
-          <p>${esc(c.summary)}</p>
+          <span class="content-indicator${hasContent ? ' has-content' : ''}">${hasContent ? `正文 ${c.content.length} 字` : '尚無正文'}</span>
+          <button class="c-toggle-content" type="button">檢視正文</button>
           <button class="c-delete" type="button">刪除</button>
-        </li>`).join('')}
+          <p>${esc(c.summary)}</p>
+          <div class="chapter-content-editor" hidden>
+            <textarea class="c-content-edit" placeholder="正文（選填）">${esc(c.content)}</textarea>
+            <button class="c-content-save" type="button">儲存正文</button>
+          </div>
+        </li>`;
+      }).join('')}
     </ul>
   `;
 
@@ -77,6 +86,33 @@ export async function renderChaptersTab(projectId, container) {
       const chapter = chapters.find((c) => c.id === id);
       if (!chapter) return;
       await putRecord(projectId, 'chapters', { ...chapter, status: sel.value });
+      renderChaptersTab(projectId, container);
+    });
+  });
+
+  // The list is meant to stay scannable, so the 正文 textarea is collapsed by
+  // default and only shown per-chapter on demand — this is purely a UI toggle,
+  // no data read/write, so it doesn't need a re-render.
+  container.querySelectorAll('.c-toggle-content').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const editor = btn.closest('li').querySelector('.chapter-content-editor');
+      const opening = editor.hidden;
+      editor.hidden = !opening;
+      btn.textContent = opening ? '收合正文' : '檢視正文';
+    });
+  });
+
+  // Same id-preserving update pattern as the status select above: write the
+  // edited 正文 back onto the EXISTING record via putRecord instead of
+  // delete+recreate, so any foreshadow pointing at this chapter keeps resolving.
+  container.querySelectorAll('.c-content-save').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const li = btn.closest('li');
+      const id = li.dataset.id;
+      const chapter = chapters.find((c) => c.id === id);
+      if (!chapter) return;
+      const content = li.querySelector('.c-content-edit').value.trim();
+      await putRecord(projectId, 'chapters', { ...chapter, content });
       renderChaptersTab(projectId, container);
     });
   });
