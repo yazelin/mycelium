@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 async function makeProject(page, name) {
   page.once('dialog', (d) => d.accept(name));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText(name);
 }
 
 test.beforeEach(async ({ page }) => {

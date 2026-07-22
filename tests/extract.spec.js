@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   page.once('dialog', (d) => d.accept('抽取測試'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('抽取測試');
 
   // entities ("設定庫") is the first registered tab and is already active right
   // after project creation — clicking it again would trigger a redundant,
