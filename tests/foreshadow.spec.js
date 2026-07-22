@@ -44,3 +44,28 @@ test('deleting a foreshadow entry removes it', async ({ page }) => {
   await page.locator('.f-delete').click();
   await expect(page.locator('.foreshadow-list li')).toHaveCount(0);
 });
+
+test('changing a foreshadow status via the inline select moves it between status groups and clears the overdue flag', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await page.locator('#f-title').fill('陸修的無限 Token 真相');
+  await page.locator('#f-plant').selectOption({ label: '第1卷・埋設章' });
+  await page.locator('#f-recover').selectOption({ label: '第2卷・回收章' });
+  await page.locator('#f-status').selectOption('埋設中');
+  await page.locator('#f-add').click();
+
+  const plantedList = page.locator('.foreshadow-list[data-status="埋設中"]');
+  const recoveredList = page.locator('.foreshadow-list[data-status="已回收"]');
+  await expect(plantedList.locator('li')).toHaveCount(1);
+  await expect(plantedList.locator('li')).toHaveClass(/overdue/);
+  await expect(plantedList.locator('li')).toContainText('逾期未回收');
+
+  // Move it to 已回收 via the inline status control (not delete+recreate) —
+  // the recovery chapter is already 完稿, so this is the daily-loop action
+  // of actually marking a foreshadow as paid off.
+  await plantedList.locator('.f-status-select').selectOption('已回收');
+
+  await expect(plantedList.locator('li')).toHaveCount(0);
+  await expect(recoveredList.locator('li')).toHaveCount(1);
+  await expect(recoveredList.locator('li')).not.toHaveClass(/overdue/);
+  await expect(recoveredList.locator('li')).not.toContainText('逾期未回收');
+});

@@ -25,7 +25,7 @@ export async function renderChaptersTab(projectId, container) {
       ${chapters.map((c) => `
         <li data-id="${c.id}">
           <strong>第${c.volume}卷・${esc(c.title)}</strong>
-          <span class="status">${esc(c.status)}</span>
+          <select class="c-status-select">${CHAPTER_STATUSES.map((s) => `<option${s === c.status ? ' selected' : ''}>${s}</option>`).join('')}</select>
           <span class="wordcount">${c.wordCount || 0} 字</span>
           <p>${esc(c.summary)}</p>
           <button class="c-delete" type="button">刪除</button>
@@ -52,6 +52,22 @@ export async function renderChaptersTab(projectId, container) {
     btn.addEventListener('click', async () => {
       const id = btn.closest('li').dataset.id;
       await deleteRecord(projectId, 'chapters', id);
+      renderChaptersTab(projectId, container);
+    });
+  });
+
+  // Status is the sole input to the progress line above and to foreshadow.js's
+  // overdue detection, yet until now it was write-once — moving a chapter
+  // through 未寫→草稿→完稿 (the most frequent action in this tool) required
+  // delete + re-create, which changes the chapter's id and orphans every
+  // foreshadow pointing at it. Write the new status back onto the EXISTING
+  // record via putRecord (preserving its id) instead.
+  container.querySelectorAll('.c-status-select').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const id = sel.closest('li').dataset.id;
+      const chapter = chapters.find((c) => c.id === id);
+      if (!chapter) return;
+      await putRecord(projectId, 'chapters', { ...chapter, status: sel.value });
       renderChaptersTab(projectId, container);
     });
   });

@@ -34,6 +34,7 @@ export async function renderForeshadowTab(projectId, container) {
         ${items.filter((i) => i.status === status).map((item) => `
           <li data-id="${item.id}" class="${isOverdue(item, chapterById) ? 'overdue' : ''}">
             <strong>${esc(item.title)}</strong>
+            <select class="f-status-select">${STATUSES.map((s) => `<option${s === item.status ? ' selected' : ''}>${s}</option>`).join('')}</select>
             <span class="plant">埋設：${esc((chapterById[item.plantChapterId] || {}).title || '（未設定）')}</span>
             <span class="recover">預計回收：${esc((chapterById[item.recoverChapterId] || {}).title || '（未設定）')}</span>
             ${isOverdue(item, chapterById) ? '<span class="overdue-flag">逾期未回收</span>' : ''}
@@ -62,6 +63,21 @@ export async function renderForeshadowTab(projectId, container) {
     btn.addEventListener('click', async () => {
       const id = btn.closest('li').dataset.id;
       await deleteRecord(projectId, 'foreshadow', id);
+      renderForeshadowTab(projectId, container);
+    });
+  });
+
+  // Same one-field-write pattern as chapters.js's status select: moving a
+  // foreshadow between 埋設中/已回收/棄用 (esp. marking one 已回收) is a daily
+  // action that previously required delete + re-create. Write status back
+  // onto the EXISTING record so isOverdue and the status-grouped lists above
+  // pick up the change on re-render.
+  container.querySelectorAll('.f-status-select').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const id = sel.closest('li').dataset.id;
+      const item = items.find((i) => i.id === id);
+      if (!item) return;
+      await putRecord(projectId, 'foreshadow', { ...item, status: sel.value });
       renderForeshadowTab(projectId, container);
     });
   });
