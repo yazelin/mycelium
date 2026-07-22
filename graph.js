@@ -9,10 +9,28 @@ import { esc } from './util.js';
 // .r-delete, or app.js tearing the tab down on tab-switch) destroys the previous
 // instance before the DOM node it's attached to is thrown away.
 let cyInstance = null;
+// cose is an async force-directed layout: it keeps scheduling animation-frame
+// callbacks that write positions back into the Cytoscape instance. Keep a reference
+// to the running layout so destroyCy() can stop it — and stop cy's own animation
+// queue too — before the instance goes away.
+let cyLayout = null;
 
 function destroyCy() {
-  if (cyInstance && !cyInstance.destroyed()) cyInstance.destroy();
+  const layout = cyLayout;
+  const inst = cyInstance;
+  cyLayout = null;
   cyInstance = null;
+  if (layout) layout.stop();
+  if (!inst || inst.destroyed()) return;
+  inst.stop();
+  // layout.stop() sets a flag but cose's already-scheduled animation-frame callback
+  // still runs once more to commit its last computed positions — that commit is
+  // what throws (`Cannot read properties of null (reading 'notify')`) if cy.destroy()
+  // already ran by the time it fires. Give that pending frame a chance to land
+  // (it's a no-op if nothing was pending) before actually destroying the instance.
+  requestAnimationFrame(() => {
+    if (!inst.destroyed()) inst.destroy();
+  });
 }
 
 // Exported for app.js's optional tab-teardown hook — see TABS.graph in app.js.
@@ -72,10 +90,14 @@ export async function renderGraphTab(projectId, container) {
       { selector: 'node', style: { label: 'data(label)', 'background-color': '#2d4a3e', color: '#fff', 'text-valign': 'center', 'font-size': 12 } },
       { selector: 'edge', style: { label: 'data(label)', width: 2, 'line-color': '#999', 'target-arrow-color': '#999', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'font-size': 10 } },
     ],
-    layout: { name: 'cose' },
   });
   cyEl._cyInstance = cy; // test hook — inspected directly in tests/graph.spec.js
   cyInstance = cy;
+  // Run cose manually (instead of passing it as the constructor's `layout` option)
+  // so the layout instance itself is reachable — otherwise there'd be nothing for
+  // destroyCy() to call .stop() on before cy.destroy() runs.
+  cyLayout = cy.layout({ name: 'cose' });
+  cyLayout.run();
 
   cy.on('tap', 'node', (evt) => {
     const entity = entities.find((e) => e.id === evt.target.id());
