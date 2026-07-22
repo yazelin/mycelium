@@ -59,6 +59,58 @@ test('accepting the delete confirm removes a foreshadow entry', async ({ page })
   await expect(page.locator('.foreshadow-list li')).toHaveCount(0);
 });
 
+test('editing a foreshadow via the inline form updates its fields and persists across a reload', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await page.locator('#f-title').fill('原伏筆名');
+  await page.locator('#f-plant').selectOption({ label: '第1卷・埋設章' });
+  await page.locator('#f-notes').fill('原備註。');
+  await page.locator('#f-add').click();
+
+  const li = page.locator('.foreshadow-list li');
+  await li.locator('.f-edit-toggle').click();
+  await li.locator('.f-edit-title').fill('修訂後伏筆名');
+  await li.locator('.f-edit-plant').selectOption({ label: '第2卷・回收章' });
+  await li.locator('.f-edit-recover').selectOption({ label: '第1卷・埋設章' });
+  await li.locator('.f-edit-notes').fill('修訂後備註。');
+  await li.locator('.f-edit-save').click();
+
+  await expect(li).toContainText('修訂後伏筆名');
+  await expect(li).toContainText('埋設：回收章');
+  await expect(li).toContainText('預計回收：埋設章');
+  await expect(li).toContainText('修訂後備註。');
+  // still exactly one row — proves this was an update, not a delete+recreate
+  await expect(page.locator('.foreshadow-list li')).toHaveCount(1);
+
+  await page.reload();
+  const tabBtn = page.locator('.tab-btn', { hasText: '伏筆追蹤' });
+  if (!(await tabBtn.evaluate((el) => el.classList.contains('active')))) await tabBtn.click();
+  const reloadedLi = page.locator('.foreshadow-list li');
+  await expect(reloadedLi).toContainText('修訂後伏筆名');
+  await expect(reloadedLi).toContainText('修訂後備註。');
+});
+
+test('cancelling a foreshadow edit discards the changes without writing', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await page.locator('#f-title').fill('原伏筆名');
+  await page.locator('#f-notes').fill('原備註。');
+  await page.locator('#f-add').click();
+
+  const li = page.locator('.foreshadow-list li');
+  await li.locator('.f-edit-toggle').click();
+  await li.locator('.f-edit-title').fill('被取消的伏筆名');
+  await li.locator('.f-edit-notes').fill('被取消的備註。');
+  await li.locator('.f-edit-cancel').click();
+
+  await expect(li).toContainText('原伏筆名');
+  await expect(li).toContainText('原備註。');
+  await expect(li).not.toContainText('被取消的伏筆名');
+
+  // Reopening the edit form must show the untouched record, not the discarded draft.
+  await li.locator('.f-edit-toggle').click();
+  await expect(li.locator('.f-edit-title')).toHaveValue('原伏筆名');
+  await expect(li.locator('.f-edit-notes')).toHaveValue('原備註。');
+});
+
 test('changing a foreshadow status via the inline select moves it between status groups and clears the overdue flag', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
   await page.locator('#f-title').fill('林小雨的驚人身世');

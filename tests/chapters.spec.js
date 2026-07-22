@@ -140,6 +140,83 @@ test('editing 正文 via the inline editor persists across a reload', async ({ p
   await expect(reloadedLi.locator('.c-content-edit')).toHaveValue('修訂後的正文，字數不同。');
 });
 
+test('editing a chapter via the inline form updates its fields and persists across a reload', async ({ page }) => {
+  await page.locator('#c-volume').fill('1');
+  await page.locator('#c-title').fill('原標題');
+  await page.locator('#c-wordcount').fill('1000');
+  await page.locator('#c-summary').fill('原摘要。');
+  await page.locator('#c-add').click();
+
+  const li = page.locator('.chapter-list li');
+  await li.locator('.c-edit-toggle').click();
+  await li.locator('.c-edit-volume').fill('2');
+  await li.locator('.c-edit-title').fill('修訂後標題');
+  await li.locator('.c-edit-wordcount').fill('2500');
+  await li.locator('.c-edit-summary').fill('修訂後摘要。');
+  await li.locator('.c-edit-save').click();
+
+  await expect(li).toContainText('第2卷・修訂後標題');
+  await expect(li).toContainText('2500 字');
+  await expect(li).toContainText('修訂後摘要。');
+  // still exactly one row — proves this was an update, not a delete+recreate
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  await page.reload();
+  const tabBtn = page.locator('.tab-btn', { hasText: '大綱' });
+  if (!(await tabBtn.evaluate((el) => el.classList.contains('active')))) await tabBtn.click();
+  const reloadedLi = page.locator('.chapter-list li');
+  await expect(reloadedLi).toContainText('第2卷・修訂後標題');
+  await expect(reloadedLi).toContainText('修訂後摘要。');
+});
+
+test('cancelling a chapter edit discards the changes without writing', async ({ page }) => {
+  await page.locator('#c-title').fill('原標題');
+  await page.locator('#c-summary').fill('原摘要。');
+  await page.locator('#c-add').click();
+
+  const li = page.locator('.chapter-list li');
+  await li.locator('.c-edit-toggle').click();
+  await li.locator('.c-edit-title').fill('被取消的標題');
+  await li.locator('.c-edit-summary').fill('被取消的摘要。');
+  await li.locator('.c-edit-cancel').click();
+
+  await expect(li).toContainText('原標題');
+  await expect(li).toContainText('原摘要。');
+  await expect(li).not.toContainText('被取消的標題');
+
+  // Reopening the edit form must show the untouched record, not the discarded draft.
+  await li.locator('.c-edit-toggle').click();
+  await expect(li.locator('.c-edit-title')).toHaveValue('原標題');
+  await expect(li.locator('.c-edit-summary')).toHaveValue('原摘要。');
+});
+
+test('editing a chapter title preserves its id (a foreshadow pointing at it keeps showing the chapter, not 未設定)', async ({ page }) => {
+  await page.locator('#c-volume').fill('1');
+  await page.locator('#c-title').fill('原標題章');
+  await page.locator('#c-add').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await page.locator('#f-title').fill('依附伏筆');
+  await page.locator('#f-plant').selectOption({ label: '第1卷・原標題章' });
+  await page.locator('#f-add').click();
+  await expect(page.locator('.foreshadow-list li')).toHaveCount(1);
+  await expect(page.locator('.foreshadow-list li')).toContainText('埋設：原標題章');
+
+  // Rename the chapter in place — if this ever regressed to delete+recreate
+  // (a new id), the foreshadow above would silently show 未設定 instead.
+  await page.locator('.tab-btn', { hasText: '大綱' }).click();
+  const li = page.locator('.chapter-list li');
+  await li.locator('.c-edit-toggle').click();
+  await li.locator('.c-edit-title').fill('改名後章節');
+  await li.locator('.c-edit-save').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await expect(page.locator('.foreshadow-list li')).toContainText('埋設：改名後章節');
+  await expect(page.locator('.foreshadow-list li')).not.toContainText('未設定');
+});
+
 test('editing 正文 preserves the chapter id (a foreshadow pointing at it keeps resolving)', async ({ page }) => {
   await page.locator('#c-volume').fill('1');
   await page.locator('#c-title').fill('伏筆依附章');
