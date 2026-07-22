@@ -116,3 +116,65 @@ test('accepting the delete confirm removes a relation directly from the graph', 
   await expect(page.locator('.relation-list li')).toHaveCount(0);
   await expect.poll(() => graphCounts(page), { timeout: 5000 }).toEqual({ nodes: 2, edges: 0 });
 });
+
+// Regression tests for #6: graph.js used to leak a Cytoscape instance (window
+// listeners + animation loop) on every re-render and every tab switch, because
+// container.innerHTML was discarded without ever calling cy.destroy(). Cytoscape
+// exposes destroyed() on an instance after destroy() runs, so we assert on that
+// directly instead of adding a separate test-only counter.
+
+test('adding a relation (an internal re-render) destroys the previous Cytoscape instance', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('#r-source option')).toHaveCount(2);
+  await page.locator('#r-source').selectOption({ label: '林小雨' });
+  await page.locator('#r-target').selectOption({ label: '城主' });
+  await page.locator('#r-type').fill('敵對');
+  await page.evaluate(() => { window.__prevCy = document.querySelector('#cy')._cyInstance; });
+
+  await page.locator('#r-add').click();
+  await expect.poll(() => graphCounts(page), { timeout: 5000 }).toEqual({ nodes: 2, edges: 1 });
+
+  const result = await page.evaluate(() => ({
+    prevDestroyed: window.__prevCy.destroyed(),
+    isNewInstance: document.querySelector('#cy')._cyInstance !== window.__prevCy,
+  }));
+  expect(result.prevDestroyed).toBe(true);
+  expect(result.isNewInstance).toBe(true);
+});
+
+test('switching away from 關係圖 destroys its Cytoscape instance', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('#cy')).toBeVisible();
+  await page.evaluate(() => { window.__prevCy = document.querySelector('#cy')._cyInstance; });
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  await expect(page.locator('.entity-list')).toBeVisible();
+
+  const prevDestroyed = await page.evaluate(() => window.__prevCy.destroyed());
+  expect(prevDestroyed).toBe(true);
+});
+
+test('repeated visits to 關係圖 never leave more than one live Cytoscape instance', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('#cy')).toBeVisible();
+
+  const visits = 4;
+  for (let i = 0; i < visits; i++) {
+    await page.evaluate((idx) => {
+      window.__instances = window.__instances || [];
+      window.__instances[idx] = document.querySelector('#cy')._cyInstance;
+    }, i);
+    await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+    await expect(page.locator('.entity-list')).toBeVisible();
+    await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+    await expect(page.locator('#cy')).toBeVisible();
+  }
+
+  // Every instance captured on a past visit must be destroyed by now — none of them
+  // are still alive holding onto window listeners / animation loops.
+  const allPastDestroyed = await page.evaluate(() => window.__instances.every((cy) => cy.destroyed()));
+  expect(allPastDestroyed).toBe(true);
+  // ...while the currently active tab still has exactly one working, live instance.
+  const currentAlive = await page.evaluate(() => !document.querySelector('#cy')._cyInstance.destroyed());
+  expect(currentAlive).toBe(true);
+});

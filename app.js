@@ -1,7 +1,7 @@
 'use strict';
 import { listProjects, createProject, deleteProjectMeta } from './db.js';
 import { renderEntitiesTab } from './entities.js';
-import { renderGraphTab } from './graph.js';
+import { renderGraphTab, destroyGraphTab } from './graph.js';
 import { renderChaptersTab } from './chapters.js';
 import { renderForeshadowTab } from './foreshadow.js';
 import { renderSettingsTab } from './settings.js';
@@ -13,7 +13,10 @@ import { renderAiTab } from './ai-panel.js';
 // caller already has direct access to this module at build time.
 const TABS = {};
 TABS.entities = { label: '設定庫', render: renderEntitiesTab };
-TABS.graph = { label: '關係圖', render: renderGraphTab };
+// `destroy` is optional — only graph.js owns a live object (Cytoscape) that
+// outlives its container's innerHTML being discarded. The other five tabs are
+// pure DOM and don't need one.
+TABS.graph = { label: '關係圖', render: renderGraphTab, destroy: destroyGraphTab };
 TABS.chapters = { label: '大綱', render: renderChaptersTab };
 TABS.foreshadow = { label: '伏筆追蹤', render: renderForeshadowTab };
 TABS.ai = { label: 'AI 助理', render: renderAiTab };
@@ -21,6 +24,7 @@ TABS.settings = { label: '設定', render: renderSettingsTab };
 
 let currentProjectId = null;
 let currentTab = null;
+let renderedTab = null; // which tab's render() last wrote live content into #tab-content — whose optional destroy() to run before that content is overwritten
 
 function $(sel) { return document.querySelector(sel); }
 
@@ -44,9 +48,15 @@ function selectTab(id) {
 
 function renderCurrentTab() {
   const container = $('#tab-content');
+  // Tear down whatever tab currently owns the container's content before we discard
+  // it — covers a tab switch, a project switch, and the project-deleted empty-state
+  // paths below alike, regardless of which one changed.
+  if (renderedTab && TABS[renderedTab].destroy) TABS[renderedTab].destroy();
+  renderedTab = null;
   if (!currentProjectId) { container.innerHTML = '<p class="empty">先建立一個作品專案。</p>'; return; }
   if (!currentTab) { container.innerHTML = '<p class="empty">尚無分頁。</p>'; return; }
   TABS[currentTab].render(currentProjectId, container);
+  renderedTab = currentTab;
 }
 
 function selectProject(id) {
