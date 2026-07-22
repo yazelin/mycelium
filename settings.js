@@ -2,6 +2,7 @@
 import { PROVIDERS, loadAiConfig, saveAiConfig } from './ai-providers.js';
 import { updateProjectMeta, listProjects } from './db.js';
 import { syncToGithub, importFromGithub } from './github-sync.js';
+import { exportProjectJson, importProjectJson } from './backup.js';
 
 // Task 10 adds a backup <section> here, extending renderSettingsTab's
 // innerHTML + event wiring, not a new file.
@@ -47,6 +48,11 @@ export async function renderSettingsTab(projectId, container) {
       <button id="gh-sync" type="button">同步到 GitHub</button>
       <button id="gh-import" type="button">從 GitHub 匯入</button>
       <p id="gh-status"></p>
+    </section>
+    <section class="backup-settings">
+      <h2>本機備份</h2>
+      <button id="export-json" type="button">匯出 JSON</button>
+      <label>匯入 JSON <input id="import-json" type="file" accept="application/json"></label>
     </section>
   `;
 
@@ -94,5 +100,14 @@ export async function renderSettingsTab(projectId, container) {
     status.textContent = '匯入中…';
     try { await importFromGithub(projectId); status.textContent = '匯入完成，請切換分頁查看。'; }
     catch (e) { status.textContent = '匯入失敗：' + e.message; }
+  });
+
+  container.querySelector('#export-json').addEventListener('click', () => exportProjectJson(projectId, project.name));
+  container.querySelector('#import-json').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('匯入會覆蓋目前作品的資料，確定？')) return;
+    await importProjectJson(projectId, JSON.parse(await file.text()));
+    alert('匯入完成，請切換分頁查看。');
   });
 }
