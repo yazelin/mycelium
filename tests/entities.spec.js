@@ -12,17 +12,17 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('adding an entity with aliases shows it in the list', async ({ page }) => {
-  await page.locator('#e-name').fill('陸修');
-  await page.locator('#e-aliases').fill('轉生者, 巨大模型檔案');
+  await page.locator('#e-name').fill('林小雨');
+  await page.locator('#e-aliases').fill('白衣客, 落雨劍客');
   await page.locator('#e-type').fill('人物');
-  await page.locator('#e-notes').fill('主角，token 無限。');
+  await page.locator('#e-notes').fill('主角，劍法通神。');
   await page.locator('#e-add').click();
 
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
-  await expect(item).toContainText('轉生者');
-  await expect(item).toContainText('巨大模型檔案');
+  await expect(item).toContainText('林小雨');
+  await expect(item).toContainText('白衣客');
+  await expect(item).toContainText('落雨劍客');
 });
 
 test('deleting an entity removes it from the list', async ({ page }) => {

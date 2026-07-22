@@ -27,14 +27,14 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('sending a free-form question shows the mocked reply and persists after reload', async ({ page }) => {
-  await page.locator('#ai-input').fill('陸修現在幾歲？');
+  await page.locator('#ai-input').fill('林小雨現在幾歲？');
   await page.locator('#ai-send').click();
 
-  await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply to] 陸修現在幾歲？');
+  await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply to] 林小雨現在幾歲？');
 
   await page.reload();
   await page.locator('.tab-btn', { hasText: 'AI 助理' }).click();
-  await expect(page.locator('.ai-msg.user')).toContainText('陸修現在幾歲？');
+  await expect(page.locator('.ai-msg.user')).toContainText('林小雨現在幾歲？');
   await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply to]');
 });
 

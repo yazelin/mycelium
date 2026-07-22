@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
   if (!(await entitiesTabBtn.evaluate((el) => el.classList.contains('active')))) {
     await entitiesTabBtn.click();
   }
-  await page.locator('#e-name').fill('陸修');
+  await page.locator('#e-name').fill('林小雨');
   await page.locator('#e-add').click();
 });
 
@@ -39,7 +39,7 @@ test('sync PUTs each data store as base64 JSON to the Contents API', async ({ pa
   expect(puts.length).toBe(5); // one per PROJECT_STORES entry
   const entitiesPut = puts.find((p) => p.url.endsWith('data/entities.json'));
   const decoded = JSON.parse(Buffer.from(entitiesPut.body.content, 'base64').toString('utf8'));
-  expect(decoded[0].name).toBe('陸修');
+  expect(decoded[0].name).toBe('林小雨');
 });
 
 test('sync without a repo binding shows an error instead of throwing', async ({ page }) => {
@@ -74,7 +74,7 @@ test('sync surfaces a clear auth error when the pre-flight GET is a 401, instead
 
 test('import round-trips Chinese entity content through base64 decode', async ({ page }) => {
   const remoteEntities = [
-    { id: 'e1', name: '陸修', aliases: ['轉生者', '巨大模型檔案'], type: '人物', tags: [], notes: '主角，記憶來自另一個世界。' },
+    { id: 'e1', name: '林小雨', aliases: ['白衣客', '落雨劍客'], type: '人物', tags: [], notes: '主角，身世成謎。' },
   ];
 
   await page.route('https://api.github.com/repos/yazelin/test-novel/contents/**', async (route) => {
@@ -107,10 +107,10 @@ test('import round-trips Chinese entity content through base64 decode', async ({
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
-  await expect(item).toContainText('轉生者');
-  await expect(item).toContainText('巨大模型檔案');
-  await expect(item).toContainText('主角，記憶來自另一個世界。');
+  await expect(item).toContainText('林小雨');
+  await expect(item).toContainText('白衣客');
+  await expect(item).toContainText('落雨劍客');
+  await expect(item).toContainText('主角，身世成謎。');
 });
 
 test('import refuses when every store 404s (nonexistent/typo repo, or not synced yet) instead of wiping the project', async ({ page }) => {
@@ -130,16 +130,16 @@ test('import refuses when every store 404s (nonexistent/typo repo, or not synced
   await page.locator('#gh-import').click();
   await expect(page.locator('#gh-status')).toContainText('找不到任何', { timeout: 10_000 });
 
-  // Nothing must have changed locally — the 陸修 entity from beforeEach must survive.
+  // Nothing must have changed locally — the 林小雨 entity from beforeEach must survive.
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });
 
 test('import proceeds when only some stores 404 (partial data is a legitimate state)', async ({ page }) => {
   const remoteEntities = [
-    { id: 'e1', name: '魔王', aliases: [], type: '人物', tags: [], notes: '唯一遠端有資料的 store。' },
+    { id: 'e1', name: '城主', aliases: [], type: '人物', tags: [], notes: '唯一遠端有資料的 store。' },
   ];
 
   await page.route('https://api.github.com/repos/yazelin/test-novel/contents/**', async (route) => {
@@ -168,11 +168,11 @@ test('import proceeds when only some stores 404 (partial data is a legitimate st
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('魔王'); // replaced the local 陸修 with the remote (partial) data
+  await expect(item).toContainText('城主'); // replaced the local 林小雨 with the remote (partial) data
 });
 
 test('dismissing the import confirm dialog leaves local data untouched', async ({ page }) => {
-  await expect(page.locator('.entity-list li')).toHaveCount(1); // the 陸修 entity added in beforeEach
+  await expect(page.locator('.entity-list li')).toHaveCount(1); // the 林小雨 entity added in beforeEach
 
   await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
 
@@ -183,5 +183,5 @@ test('dismissing the import confirm dialog leaves local data untouched', async (
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });

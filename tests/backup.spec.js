@@ -14,9 +14,9 @@ test.beforeEach(async ({ page }) => {
   if (!(await entitiesTabBtn.evaluate((el) => el.classList.contains('active')))) {
     await entitiesTabBtn.click();
   }
-  await page.locator('#e-name').fill('陸修');
-  await page.locator('#e-aliases').fill('轉生者,巨大模型檔案');
-  await page.locator('#e-notes').fill('主角，記憶來自另一個世界。');
+  await page.locator('#e-name').fill('林小雨');
+  await page.locator('#e-aliases').fill('白衣客,落雨劍客');
+  await page.locator('#e-notes').fill('主角，身世成謎。');
   await page.locator('#e-add').click();
   await expect(page.locator('.entity-list li')).toHaveCount(1);
 });
@@ -31,9 +31,9 @@ test('export downloads a JSON file containing current entities with Chinese cont
   const path = await download.path();
   const fs = await import('node:fs/promises');
   const content = JSON.parse(await fs.readFile(path, 'utf8'));
-  expect(content.entities[0].name).toBe('陸修');
-  expect(content.entities[0].aliases).toEqual(['轉生者', '巨大模型檔案']);
-  expect(content.entities[0].notes).toBe('主角，記憶來自另一個世界。');
+  expect(content.entities[0].name).toBe('林小雨');
+  expect(content.entities[0].aliases).toEqual(['白衣客', '落雨劍客']);
+  expect(content.entities[0].notes).toBe('主角，身世成謎。');
   // filename must be sane even though the project name ("備份測試") is entirely
   // non-ASCII — it should not break, truncate to nothing meaningful, or contain
   // path separators.
@@ -89,7 +89,7 @@ test('dismissing the import confirm dialog leaves local data untouched', async (
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });
 
 test('importing a wrong-shaped JSON file leaves existing data intact and reports an error, not success', async ({ page }) => {
@@ -120,7 +120,7 @@ test('importing a wrong-shaped JSON file leaves existing data intact and reports
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });
 
 test('importing malformed (unparseable) JSON shows a readable error and changes nothing', async ({ page }) => {
@@ -144,7 +144,7 @@ test('importing malformed (unparseable) JSON shows a readable error and changes 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });
 
 test('importing a payload missing some store keys is rejected and leaves all data intact, including stores omitted from the payload', async ({ page }) => {
@@ -183,7 +183,7 @@ test('importing a payload missing some store keys is rejected and leaves all dat
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const entityItem = page.locator('.entity-list li');
   await expect(entityItem).toHaveCount(1);
-  await expect(entityItem).toContainText('陸修');
+  await expect(entityItem).toContainText('林小雨');
 
   // The store omitted from the payload must still have its pre-existing data.
   await page.locator('.tab-btn', { hasText: '大綱' }).click();
@@ -224,7 +224,7 @@ test('importing a correctly-shaped payload with garbage array elements is reject
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });
 
 test('importing a payload with an invalid record id ({}) is rejected and leaves pre-existing data intact', async ({ page }) => {
@@ -258,7 +258,7 @@ test('importing a payload with an invalid record id ({}) is rejected and leaves 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });
 
 test('importing a payload with an invalid record id (true) is rejected and leaves pre-existing data intact', async ({ page }) => {
@@ -288,7 +288,7 @@ test('importing a payload with an invalid record id (true) is rejected and leave
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
+  await expect(item).toContainText('林小雨');
 });
 
 test('importing a record with no id field succeeds and gets an auto-assigned id', async ({ page }) => {
@@ -337,7 +337,7 @@ test('exporting projects with different Chinese names produces distinct filename
   // it too — the old ASCII-only `\w` sanitizer collapsed every Chinese name
   // down to the same "mycelium-_.json", so two projects would silently
   // overwrite each other's export in the Downloads folder.
-  page.once('dialog', (d) => d.accept('轉生token無限'));
+  page.once('dialog', (d) => d.accept('劍與江湖'));
   await page.locator('#project-new').click();
   await page.waitForTimeout(100);
 
@@ -348,6 +348,6 @@ test('exporting projects with different Chinese names produces distinct filename
   ]);
   const filename2 = download2.suggestedFilename();
 
-  expect(filename2).toContain('轉生');
+  expect(filename2).toContain('劍與江湖');
   expect(filename2).not.toBe(filename1);
 });

@@ -450,17 +450,17 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('adding an entity with aliases shows it in the list', async ({ page }) => {
-  await page.locator('#e-name').fill('陸修');
-  await page.locator('#e-aliases').fill('轉生者, 巨大模型檔案');
+  await page.locator('#e-name').fill('林小雨');
+  await page.locator('#e-aliases').fill('白衣客, 落雨劍客');
   await page.locator('#e-type').fill('人物');
-  await page.locator('#e-notes').fill('主角，token 無限。');
+  await page.locator('#e-notes').fill('主角，劍法通神。');
   await page.locator('#e-add').click();
 
   const item = page.locator('.entity-list li');
   await expect(item).toHaveCount(1);
-  await expect(item).toContainText('陸修');
-  await expect(item).toContainText('轉生者');
-  await expect(item).toContainText('巨大模型檔案');
+  await expect(item).toContainText('林小雨');
+  await expect(item).toContainText('白衣客');
+  await expect(item).toContainText('落雨劍客');
 });
 
 test('deleting an entity removes it from the list', async ({ page }) => {
@@ -638,14 +638,14 @@ async function addEntity(page, name) {
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await makeProject(page, '關係圖測試');
-  await addEntity(page, '陸修');
-  await addEntity(page, '魔王');
+  await addEntity(page, '林小雨');
+  await addEntity(page, '城主');
 });
 
 test('adding a relation renders a node graph with an edge', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '關係圖' }).click();
-  await page.locator('#r-source').selectOption({ label: '陸修' });
-  await page.locator('#r-target').selectOption({ label: '魔王' });
+  await page.locator('#r-source').selectOption({ label: '林小雨' });
+  await page.locator('#r-target').selectOption({ label: '城主' });
   await page.locator('#r-type').fill('敵對');
   await page.locator('#r-add').click();
 
@@ -781,14 +781,14 @@ test.beforeEach(async ({ page }) => {
 
 test('adding a chapter shows it in the list with progress stats', async ({ page }) => {
   await page.locator('#c-volume').fill('1');
-  await page.locator('#c-title').fill('轉生與初次詠唱');
+  await page.locator('#c-title').fill('入城與初次交手');
   await page.locator('#c-status').selectOption('完稿');
   await page.locator('#c-wordcount').fill('3200');
-  await page.locator('#c-summary').fill('陸修轉生，發現 Token 無限。');
+  await page.locator('#c-summary').fill('林小雨入城，發現城主的秘密。');
   await page.locator('#c-add').click();
 
   await expect(page.locator('.chapter-list li')).toHaveCount(1);
-  await expect(page.locator('.chapter-list li')).toContainText('轉生與初次詠唱');
+  await expect(page.locator('.chapter-list li')).toContainText('入城與初次交手');
   await expect(page.locator('.chapter-stats')).toContainText('完稿 1');
 });
 
@@ -931,7 +931,7 @@ test.beforeEach(async ({ page }) => {
 
 test('foreshadow whose recovery chapter is already 完稿 but status stays 埋設中 is flagged overdue', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
-  await page.locator('#f-title').fill('陸修的無限 Token 真相');
+  await page.locator('#f-title').fill('林小雨的驚人身世');
   await page.locator('#f-plant').selectOption({ label: '第1卷・埋設章' });
   await page.locator('#f-recover').selectOption({ label: '第2卷・回收章' });
   await page.locator('#f-status').selectOption('埋設中');
@@ -1312,14 +1312,14 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('sending a free-form question shows the mocked reply and persists after reload', async ({ page }) => {
-  await page.locator('#ai-input').fill('陸修現在幾歲？');
+  await page.locator('#ai-input').fill('林小雨現在幾歲？');
   await page.locator('#ai-send').click();
 
-  await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply to] 陸修現在幾歲？');
+  await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply to] 林小雨現在幾歲？');
 
   await page.reload();
   await page.locator('.tab-btn', { hasText: 'AI 助理' }).click();
-  await expect(page.locator('.ai-msg.user')).toContainText('陸修現在幾歲？');
+  await expect(page.locator('.ai-msg.user')).toContainText('林小雨現在幾歲？');
   await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply to]');
 });
 
@@ -1483,14 +1483,14 @@ import { test, expect } from '@playwright/test';
 
 const MOCK_EXTRACTION = {
   entities: [
-    { name: '魔王', aliasOf: null, type: '人物', notes: '追殺主角的勢力領袖', reason: '首次登場的新角色' },
-    { name: '系統管理員陳先生', aliasOf: '魔王', type: null, notes: null, reason: '本章揭露魔王其實就是系統管理員陳先生' },
+    { name: '城主', aliasOf: null, type: '人物', notes: '追殺主角的勢力領袖', reason: '首次登場的新角色' },
+    { name: '黑袍人', aliasOf: '城主', type: null, notes: null, reason: '本章揭露城主其實就是黑袍人' },
   ],
   relations: [
-    { source: '陸修', target: '魔王', type: '追殺', reason: '魔王軍全境追殺陸修' },
+    { source: '林小雨', target: '城主', type: '追殺', reason: '城主軍全境追殺林小雨' },
   ],
   foreshadow: [
-    { title: '陸修的真實身份', notes: '暗示陸修是上一代殘留的模型', reason: '魔王的台詞埋了伏筆' },
+    { title: '林小雨的真實身份', notes: '暗示林小雨其實是城主早年的徒弟', reason: '城主的台詞埋了伏筆' },
   ],
 };
 
@@ -1505,7 +1505,7 @@ test.beforeEach(async ({ page }) => {
   await page.waitForTimeout(100);
 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  await page.locator('#e-name').fill('陸修');
+  await page.locator('#e-name').fill('林小雨');
   await page.locator('#e-add').click();
 
   await page.locator('.tab-btn', { hasText: '設定' }).click();
@@ -1524,21 +1524,21 @@ test('extracting text produces candidates; applying merges aliases and links rel
   await page.locator('#ex-run').click();
 
   await expect(page.locator('#ex-entities li')).toHaveCount(2);
-  await expect(page.locator('#ex-entities li').nth(1)).toContainText('合併為「魔王」的別名');
+  await expect(page.locator('#ex-entities li').nth(1)).toContainText('合併為「城主」的別名');
 
   await page.locator('#ex-apply').click();
   await page.waitForTimeout(300);
 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  const villain = page.locator('.entity-list li', { hasText: '魔王' });
-  await expect(villain).toContainText('系統管理員陳先生'); // merged as alias, not a separate entity
-  await expect(page.locator('.entity-list li')).toHaveCount(2); // 陸修 + 魔王 only, no duplicate
+  const villain = page.locator('.entity-list li', { hasText: '城主' });
+  await expect(villain).toContainText('黑袍人'); // merged as alias, not a separate entity
+  await expect(page.locator('.entity-list li')).toHaveCount(2); // 林小雨 + 城主 only, no duplicate
 
   await page.locator('.tab-btn', { hasText: '關係圖' }).click();
-  await expect(page.locator('#r-source option', { hasText: '魔王' })).toHaveCount(1);
+  await expect(page.locator('#r-source option', { hasText: '城主' })).toHaveCount(1);
 
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
-  await expect(page.locator('.foreshadow-list li', { hasText: '陸修的真實身份' })).toHaveCount(1);
+  await expect(page.locator('.foreshadow-list li', { hasText: '林小雨的真實身份' })).toHaveCount(1);
 });
 ```
 
@@ -1746,7 +1746,7 @@ test.beforeEach(async ({ page }) => {
   await page.waitForTimeout(100);
 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  await page.locator('#e-name').fill('陸修');
+  await page.locator('#e-name').fill('林小雨');
   await page.locator('#e-add').click();
 });
 
@@ -1770,7 +1770,7 @@ test('sync PUTs each data store as base64 JSON to the Contents API', async ({ pa
   expect(puts.length).toBe(5); // one per PROJECT_STORES entry
   const entitiesPut = puts.find((p) => p.url.endsWith('data/entities.json'));
   const decoded = JSON.parse(Buffer.from(entitiesPut.body.content, 'base64').toString('utf8'));
-  expect(decoded[0].name).toBe('陸修');
+  expect(decoded[0].name).toBe('林小雨');
 });
 
 test('sync without a repo binding shows an error instead of throwing', async ({ page }) => {
@@ -1974,7 +1974,7 @@ test.beforeEach(async ({ page }) => {
   await page.waitForTimeout(100);
 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  await page.locator('#e-name').fill('陸修');
+  await page.locator('#e-name').fill('林小雨');
   await page.locator('#e-add').click();
 });
 
@@ -1987,7 +1987,7 @@ test('export downloads a JSON file containing current entities', async ({ page }
   const path = await download.path();
   const fs = await import('node:fs/promises');
   const content = JSON.parse(await fs.readFile(path, 'utf8'));
-  expect(content.entities[0].name).toBe('陸修');
+  expect(content.entities[0].name).toBe('林小雨');
 });
 
 test('import overwrites current project data', async ({ page }) => {

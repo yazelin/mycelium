@@ -2,14 +2,14 @@ import { test, expect } from '@playwright/test';
 
 const MOCK_EXTRACTION = {
   entities: [
-    { name: '魔王', aliasOf: null, type: '人物', notes: '追殺主角的勢力領袖', reason: '首次登場的新角色' },
-    { name: '系統管理員陳先生', aliasOf: '魔王', type: null, notes: null, reason: '本章揭露魔王其實就是系統管理員陳先生' },
+    { name: '城主', aliasOf: null, type: '人物', notes: '追殺主角的勢力領袖', reason: '首次登場的新角色' },
+    { name: '黑袍人', aliasOf: '城主', type: null, notes: null, reason: '本章揭露城主其實就是黑袍人' },
   ],
   relations: [
-    { source: '陸修', target: '魔王', type: '追殺', reason: '魔王軍全境追殺陸修' },
+    { source: '林小雨', target: '城主', type: '追殺', reason: '城主軍全境追殺林小雨' },
   ],
   foreshadow: [
-    { title: '陸修的真實身份', notes: '暗示陸修是上一代殘留的模型', reason: '魔王的台詞埋了伏筆' },
+    { title: '林小雨的真實身份', notes: '暗示林小雨其實是城主早年的徒弟', reason: '城主的台詞埋了伏筆' },
   ],
 };
 
@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
   if (!(await entitiesTabBtn.evaluate((el) => el.classList.contains('active')))) {
     await entitiesTabBtn.click();
   }
-  await page.locator('#e-name').fill('陸修');
+  await page.locator('#e-name').fill('林小雨');
   await page.locator('#e-add').click();
   await expect(page.locator('.entity-list li')).toHaveCount(1);
 
@@ -52,7 +52,7 @@ test('extracting text produces candidates; applying merges aliases and links rel
   await page.locator('#ex-run').click();
 
   await expect(page.locator('#ex-entities li')).toHaveCount(2);
-  await expect(page.locator('#ex-entities li').nth(1)).toContainText('合併為「魔王」的別名');
+  await expect(page.locator('#ex-entities li').nth(1)).toContainText('合併為「城主」的別名');
 
   // #ex-apply's handler fires alert() only after all its putRecord() writes
   // have landed — register the wait before clicking (not after, which would
@@ -64,27 +64,27 @@ test('extracting text produces candidates; applying merges aliases and links rel
   await (await applyDialog).accept();
 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  const villain = page.locator('.entity-list li', { hasText: '魔王' });
-  await expect(villain).toContainText('系統管理員陳先生'); // merged as alias, not a separate entity
-  await expect(page.locator('.entity-list li')).toHaveCount(2); // 陸修 + 魔王 only, no duplicate
+  const villain = page.locator('.entity-list li', { hasText: '城主' });
+  await expect(villain).toContainText('黑袍人'); // merged as alias, not a separate entity
+  await expect(page.locator('.entity-list li')).toHaveCount(2); // 林小雨 + 城主 only, no duplicate
 
   await page.locator('.tab-btn', { hasText: '關係圖' }).click();
-  await expect(page.locator('#r-source option', { hasText: '魔王' })).toHaveCount(1);
+  await expect(page.locator('#r-source option', { hasText: '城主' })).toHaveCount(1);
 
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
-  await expect(page.locator('.foreshadow-list li', { hasText: '陸修的真實身份' })).toHaveCount(1);
+  await expect(page.locator('.foreshadow-list li', { hasText: '林小雨的真實身份' })).toHaveCount(1);
 });
 
 test('alias candidate listed before its new-entity target still merges without creating a duplicate', async ({ page }) => {
   // Reverse of MOCK_EXTRACTION's entity order: the alias candidate comes
-  // first, its aliasOf target ("魔王") is only created afterwards. This is
+  // first, its aliasOf target ("城主") is only created afterwards. This is
   // exactly the ordering the AI has no instruction to avoid, and the bug
   // this test guards against is a silently-created orphan second entity.
   const REORDERED_EXTRACTION = {
     ...MOCK_EXTRACTION,
     entities: [
-      { name: '系統管理員陳先生', aliasOf: '魔王', type: null, notes: null, reason: '本章揭露魔王其實就是系統管理員陳先生' },
-      { name: '魔王', aliasOf: null, type: '人物', notes: '追殺主角的勢力領袖', reason: '首次登場的新角色' },
+      { name: '黑袍人', aliasOf: '城主', type: null, notes: null, reason: '本章揭露城主其實就是黑袍人' },
+      { name: '城主', aliasOf: null, type: '人物', notes: '追殺主角的勢力領袖', reason: '首次登場的新角色' },
     ],
   };
   await page.route('**/chat/completions', async (route) => {
@@ -95,14 +95,14 @@ test('alias candidate listed before its new-entity target still merges without c
   await page.locator('#ex-run').click();
 
   await expect(page.locator('#ex-entities li')).toHaveCount(2);
-  await expect(page.locator('#ex-entities li').nth(0)).toContainText('合併為「魔王」的別名');
+  await expect(page.locator('#ex-entities li').nth(0)).toContainText('合併為「城主」的別名');
 
   const applyDialog = page.waitForEvent('dialog');
   await page.locator('#ex-apply').click();
   await (await applyDialog).accept();
 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  const villain = page.locator('.entity-list li', { hasText: '魔王' });
-  await expect(villain).toContainText('系統管理員陳先生'); // merged as alias, not a separate entity
-  await expect(page.locator('.entity-list li')).toHaveCount(2); // 陸修 + 魔王 only, no duplicate/orphan
+  const villain = page.locator('.entity-list li', { hasText: '城主' });
+  await expect(villain).toContainText('黑袍人'); // merged as alias, not a separate entity
+  await expect(page.locator('.entity-list li')).toHaveCount(2); // 林小雨 + 城主 only, no duplicate/orphan
 });

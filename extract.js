@@ -83,15 +83,15 @@ function renderCandidates(projectId, container, existingEntities, result) {
     // Mutable, kept in sync as each candidate is written — not a one-time
     // snapshot. The flagship scenario this app exists for is a name that is
     // BOTH a brand-new entity AND the alias target of another candidate in
-    // the very same batch (e.g. "魔王" appears as a new entity, then later in
-    // the same extraction "系統管理員陳先生" is revealed as 魔王's alias).
+    // the very same batch (e.g. "城主" appears as a new entity, then later in
+    // the same extraction "黑袍人" is revealed as 城主's alias).
     const nameToEntity = Object.fromEntries(existingEntities.map((e) => [e.name, e]));
 
     const entityLis = [...box.querySelectorAll('#ex-entities li')];
 
     // Two passes, not one: the AI response is a flat array with no guaranteed
     // ordering between a new entity and candidates that alias it — a chapter
-    // could plausibly introduce "系統管理員陳先生" before revealing "魔王" is
+    // could plausibly introduce "黑袍人" before revealing "城主" is
     // the same person, so the alias candidate can appear before its target.
     // Pass 1 creates every plain new-entity candidate first, so pass 2's
     // alias lookups always see a complete nameToEntity map regardless of the

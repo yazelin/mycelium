@@ -10,14 +10,14 @@ test.beforeEach(async ({ page }) => {
 
 test('adding a chapter shows it in the list with progress stats', async ({ page }) => {
   await page.locator('#c-volume').fill('1');
-  await page.locator('#c-title').fill('轉生與初次詠唱');
+  await page.locator('#c-title').fill('入城與初次交手');
   await page.locator('#c-status').selectOption('完稿');
   await page.locator('#c-wordcount').fill('3200');
-  await page.locator('#c-summary').fill('陸修轉生，發現 Token 無限。');
+  await page.locator('#c-summary').fill('林小雨入城，發現城主的秘密。');
   await page.locator('#c-add').click();
 
   await expect(page.locator('.chapter-list li')).toHaveCount(1);
-  await expect(page.locator('.chapter-list li')).toContainText('轉生與初次詠唱');
+  await expect(page.locator('.chapter-list li')).toContainText('入城與初次交手');
   await expect(page.locator('.chapter-stats')).toContainText('完稿 1');
 });
 

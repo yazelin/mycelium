@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
 
 test('foreshadow whose recovery chapter is already 完稿 but status stays 埋設中 is flagged overdue', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
-  await page.locator('#f-title').fill('陸修的無限 Token 真相');
+  await page.locator('#f-title').fill('林小雨的驚人身世');
   await page.locator('#f-plant').selectOption({ label: '第1卷・埋設章' });
   await page.locator('#f-recover').selectOption({ label: '第2卷・回收章' });
   await page.locator('#f-status').selectOption('埋設中');
@@ -47,7 +47,7 @@ test('deleting a foreshadow entry removes it', async ({ page }) => {
 
 test('changing a foreshadow status via the inline select moves it between status groups and clears the overdue flag', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
-  await page.locator('#f-title').fill('陸修的無限 Token 真相');
+  await page.locator('#f-title').fill('林小雨的驚人身世');
   await page.locator('#f-plant').selectOption({ label: '第1卷・埋設章' });
   await page.locator('#f-recover').selectOption({ label: '第2卷・回收章' });
   await page.locator('#f-status').selectOption('埋設中');
