@@ -51,6 +51,15 @@ export async function renderChaptersTab(projectId, container) {
   container.querySelectorAll('.c-delete').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.closest('li').dataset.id;
+      // 正文是這個 app 裡最高價值的資料——刪章節連正文都會一起消失，且沒有
+      // undo，所以確認訊息一定要點出這件事，但只在真的有正文時才提，避免
+      // 對空章節也嚇唬使用者。
+      const chapter = chapters.find((c) => c.id === id);
+      const hasContent = !!(chapter && chapter.content && chapter.content.trim());
+      const message = hasContent
+        ? '確定要刪除這個章節？正文也會一併刪除，此動作無法復原。'
+        : '確定要刪除這個章節？';
+      if (!confirm(message)) return;
       await deleteRecord(projectId, 'chapters', id);
       renderChaptersTab(projectId, container);
     });

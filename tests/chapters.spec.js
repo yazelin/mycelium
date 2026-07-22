@@ -21,11 +21,44 @@ test('adding a chapter shows it in the list with progress stats', async ({ page 
   await expect(page.locator('.chapter-stats')).toContainText('完稿 1');
 });
 
-test('deleting a chapter removes it', async ({ page }) => {
+test('dismissing the delete confirm on a chapter with no content leaves it in place', async ({ page }) => {
   await page.locator('#c-title').fill('待刪章節');
   await page.locator('#c-add').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  page.once('dialog', (d) => d.dismiss());
+  await page.locator('.c-delete').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+});
+
+test('accepting the delete confirm removes a chapter with no content, and the confirm message does not mention 正文', async ({ page }) => {
+  await page.locator('#c-title').fill('待刪章節');
+  await page.locator('#c-add').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  let message = null;
+  page.once('dialog', (d) => { message = d.message(); d.accept(); });
   await page.locator('.c-delete').click();
   await expect(page.locator('.chapter-list li')).toHaveCount(0);
+  expect(message).not.toContain('正文');
+});
+
+test('deleting a chapter that has content warns that the 正文 will be deleted too, and accepting removes it', async ({ page }) => {
+  await page.locator('#c-title').fill('有正文的章節');
+  await page.locator('#c-content').fill('這是這一章的正文內容。');
+  await page.locator('#c-add').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  // Dismiss first — must leave the chapter (and its content) untouched.
+  page.once('dialog', (d) => d.dismiss());
+  await page.locator('.c-delete').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  let message = null;
+  page.once('dialog', (d) => { message = d.message(); d.accept(); });
+  await page.locator('.c-delete').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(0);
+  expect(message).toContain('正文');
 });
 
 test('changing a chapter status via the inline select updates progress stats and preserves its id (a foreshadow pointing at it keeps resolving)', async ({ page }) => {

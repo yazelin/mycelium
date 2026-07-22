@@ -71,6 +71,7 @@ export async function renderGraphTab(projectId, container) {
   container.querySelectorAll('.r-delete').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.closest('li').dataset.id;
+      if (!confirm('確定要刪除這筆關係？')) return;
       await deleteRecord(projectId, 'relations', id);
       renderGraphTab(projectId, container);
     });

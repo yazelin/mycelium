@@ -62,6 +62,7 @@ export async function renderForeshadowTab(projectId, container) {
   container.querySelectorAll('.f-delete').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.closest('li').dataset.id;
+      if (!confirm('確定要刪除這筆伏筆？')) return;
       await deleteRecord(projectId, 'foreshadow', id);
       renderForeshadowTab(projectId, container);
     });

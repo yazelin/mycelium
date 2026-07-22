@@ -37,10 +37,24 @@ test('foreshadow whose recovery chapter is already 完稿 but status stays 埋�
   await expect(item).toContainText('逾期未回收');
 });
 
-test('deleting a foreshadow entry removes it', async ({ page }) => {
+test('dismissing the delete confirm on a foreshadow entry leaves it in place', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
   await page.locator('#f-title').fill('待刪伏筆');
   await page.locator('#f-add').click();
+  await expect(page.locator('.foreshadow-list li')).toHaveCount(1);
+
+  page.once('dialog', (d) => d.dismiss());
+  await page.locator('.f-delete').click();
+  await expect(page.locator('.foreshadow-list li')).toHaveCount(1);
+});
+
+test('accepting the delete confirm removes a foreshadow entry', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await page.locator('#f-title').fill('待刪伏筆');
+  await page.locator('#f-add').click();
+  await expect(page.locator('.foreshadow-list li')).toHaveCount(1);
+
+  page.once('dialog', (d) => d.accept());
   await page.locator('.f-delete').click();
   await expect(page.locator('.foreshadow-list li')).toHaveCount(0);
 });
