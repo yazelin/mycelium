@@ -3,6 +3,7 @@ import { chat } from './ai-providers.js';
 import { buildContext } from './ai-context.js';
 import { getAllRecords, putRecord } from './db.js';
 import { esc } from './util.js';
+import { renderExtractPanel } from './extract.js';
 
 const SYSTEM_BASE = '你是小說創作助理，以下是這部作品目前的設定資料，回答時要以此為準，發現前後矛盾要明確指出：\n\n';
 
@@ -44,6 +45,15 @@ function renderChatControls(projectId, container, logEl) {
   });
 }
 
+function renderControls(projectId, controls, logEl) {
+  const task = document.querySelector('#ai-task').value;
+  if (task === 'extract') {
+    renderExtractPanel(projectId, controls);
+  } else {
+    renderChatControls(projectId, controls, logEl);
+  }
+}
+
 export async function renderAiTab(projectId, container) {
   const logs = await getAllRecords(projectId, 'chatlogs');
   container.innerHTML = `
@@ -55,12 +65,13 @@ export async function renderAiTab(projectId, container) {
         <option value="chat">自由問答</option>
         <option value="consistency">一致性檢查</option>
         <option value="plot">劇情/反轉發想</option>
+        <option value="extract">抽取圖資料</option>
       </select>
     </div>
     <div id="ai-controls"></div>
   `;
   const logEl = container.querySelector('#ai-log');
   const controls = container.querySelector('#ai-controls');
-  renderChatControls(projectId, controls, logEl);
-  container.querySelector('#ai-task').addEventListener('change', () => renderChatControls(projectId, controls, logEl));
+  renderControls(projectId, controls, logEl);
+  container.querySelector('#ai-task').addEventListener('change', () => renderControls(projectId, controls, logEl));
 }
