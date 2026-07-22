@@ -10,3 +10,10 @@ body { font-family: system-ui, -apple-system, "PingFang TC", "Microsoft JhengHei
 textarea { width: 100%; min-height: 4rem; }
 input, select, textarea { font: inherit; }
 li.overdue { background: #fde2e2; }
+.ai-log { max-height: 24rem; overflow-y: auto; border: 1px solid #ddd; border-radius: .25rem; padding: .5rem; margin-bottom: .5rem; background: #fff; }
+.ai-msg { padding: .4rem .6rem; margin: .3rem 0; border-radius: .25rem; white-space: pre-wrap; }
+.ai-msg.user { background: #eef2ef; }
+.ai-msg.assistant { background: #e3ede8; border-left: 3px solid #2d4a3e; }
+.ai-msg.error { background: #fde2e2; color: #a33; }
+.ai-msg.pending { color: #666; font-style: italic; }
+#ai-send:disabled { opacity: .6; cursor: not-allowed; }
