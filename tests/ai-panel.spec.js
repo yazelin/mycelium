@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   page.once('dialog', (d) => d.accept('AI 助理測試'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('AI 助理測試');
 
   // configure the default task so chat() has somewhere to send requests
   // exact match: substring hasText would also match the pre-existing "設定庫" (entities) tab

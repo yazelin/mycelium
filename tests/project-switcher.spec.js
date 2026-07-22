@@ -14,7 +14,7 @@ test('creating a project adds it to the switcher and selects it', async ({ page 
 test('two projects stay separate and survive a reload', async ({ page }) => {
   page.once('dialog', (d) => d.accept('作品A'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('作品A');
   page.once('dialog', (d) => d.accept('作品B'));
   await page.locator('#project-new').click();
 
@@ -27,7 +27,7 @@ test('two projects stay separate and survive a reload', async ({ page }) => {
 test('deleting the current project removes it from the switcher', async ({ page }) => {
   page.once('dialog', (d) => d.accept('要刪除的'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('要刪除的');
   page.once('dialog', (d) => d.accept());
   await page.locator('#project-delete').click();
   await expect(page.locator('#project-select option')).toHaveCount(0);

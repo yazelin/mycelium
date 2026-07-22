@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   page.once('dialog', (d) => d.accept('大綱測試'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('大綱測試');
   await page.locator('.tab-btn', { hasText: '大綱' }).click();
 });
 

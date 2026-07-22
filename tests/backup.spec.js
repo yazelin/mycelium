@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   page.once('dialog', (d) => d.accept('備份測試'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('備份測試');
 
   // entities ("設定庫") is the first registered tab and is already active right
   // after project creation — clicking it again would trigger a redundant,
@@ -339,7 +339,7 @@ test('exporting projects with different Chinese names produces distinct filename
   // overwrite each other's export in the Downloads folder.
   page.once('dialog', (d) => d.accept('劍與江湖'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('劍與江湖');
 
   await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
   const [download2] = await Promise.all([

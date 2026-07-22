@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   page.once('dialog', (d) => d.accept('伏筆測試'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('伏筆測試');
   await addChapter(page, 1, '埋設章', '完稿');
   await addChapter(page, 2, '回收章', '完稿'); // already written, but foreshadow will stay 埋設中 → overdue
 });

@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
   page.once('dialog', (d) => d.accept('AI 設定測試'));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#project-select')).toContainText('AI 設定測試');
   // exact match: substring hasText would also match the pre-existing "設定庫" (entities) tab
   await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
 });
