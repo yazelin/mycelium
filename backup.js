@@ -12,8 +12,23 @@ export async function collectProjectData(projectId) {
 // strings, null, arrays, ...) throws once written, but only after
 // replaceProjectData has already deleted the store's existing records — so
 // this must be checked up front, not discovered mid-write.
+//
+// A plain-object shape alone isn't enough, though: IndexedDB's `put()` also
+// validates the record's `id` (its keyPath value) and throws synchronously
+// (`DataError: ... yielded a value that is not a valid key`) for a truthy
+// `id` that isn't a valid key (e.g. `{}`, `true`, an array, an object) —
+// again only after the store has already been emptied. A missing or falsy
+// `id` must still be allowed through: db.js's `putRecord` intentionally
+// auto-assigns a fresh id in that case (`if (!record.id) record.id = ...`),
+// so only a *truthy* id that isn't a non-empty string or a number is invalid.
+function hasValidIdIfPresent(rec) {
+  const id = rec.id;
+  if (!id) return true; // falsy/absent: putRecord auto-assigns one
+  return (typeof id === 'string') || (typeof id === 'number');
+}
+
 function isPlainRecord(rec) {
-  return rec !== null && typeof rec === 'object' && !Array.isArray(rec);
+  return rec !== null && typeof rec === 'object' && !Array.isArray(rec) && hasValidIdIfPresent(rec);
 }
 
 export async function replaceProjectData(projectId, data) {

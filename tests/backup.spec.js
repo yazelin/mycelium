@@ -227,6 +227,103 @@ test('importing a correctly-shaped payload with garbage array elements is reject
   await expect(item).toContainText('陸修');
 });
 
+test('importing a payload with an invalid record id ({}) is rejected and leaves pre-existing data intact', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  // Correct outer shape and plain-object records (passing isPlainRecord's
+  // object/array checks), but the record's `id` is `{}` — a truthy value
+  // IndexedDB's put() rejects as "not a valid key" (DataError), thrown only
+  // after replaceProjectData's delete loop had already emptied the store.
+  const payload = JSON.stringify({
+    entities: [{ id: {}, name: '不應該出現的角色', aliases: [], type: '', tags: [], notes: '' }],
+    relations: [],
+    chapters: [],
+    foreshadow: [],
+    chatlogs: [],
+  });
+
+  let importFinished;
+  const importFinishedPromise = new Promise((resolve) => { importFinished = resolve; });
+  let alertMessage = null;
+  page.on('dialog', async (d) => {
+    if (d.type() === 'alert') { alertMessage = d.message(); importFinished(); }
+    await d.accept();
+  });
+
+  await page.locator('#import-json').setInputFiles({ name: 'bad-id-object.json', mimeType: 'application/json', buffer: Buffer.from(payload, 'utf8') });
+  await importFinishedPromise;
+
+  expect(alertMessage).not.toContain('匯入完成');
+  expect(alertMessage).toContain('匯入失敗');
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('陸修');
+});
+
+test('importing a payload with an invalid record id (true) is rejected and leaves pre-existing data intact', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  const payload = JSON.stringify({
+    entities: [{ id: true, name: '不應該出現的角色', aliases: [], type: '', tags: [], notes: '' }],
+    relations: [],
+    chapters: [],
+    foreshadow: [],
+    chatlogs: [],
+  });
+
+  let importFinished;
+  const importFinishedPromise = new Promise((resolve) => { importFinished = resolve; });
+  let alertMessage = null;
+  page.on('dialog', async (d) => {
+    if (d.type() === 'alert') { alertMessage = d.message(); importFinished(); }
+    await d.accept();
+  });
+
+  await page.locator('#import-json').setInputFiles({ name: 'bad-id-bool.json', mimeType: 'application/json', buffer: Buffer.from(payload, 'utf8') });
+  await importFinishedPromise;
+
+  expect(alertMessage).not.toContain('匯入完成');
+  expect(alertMessage).toContain('匯入失敗');
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('陸修');
+});
+
+test('importing a record with no id field succeeds and gets an auto-assigned id', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  // No `id` key at all — the tolerated case db.js's putRecord relies on
+  // (`if (!record.id) record.id = newId(...)`). This must still pass
+  // validation and import successfully, not be conflated with the invalid
+  // truthy-id cases above.
+  const payload = JSON.stringify({
+    entities: [{ name: '無編號的角色', aliases: [], type: '', tags: [], notes: '自動配發編號測試。' }],
+    relations: [],
+    chapters: [],
+    foreshadow: [],
+    chatlogs: [],
+  });
+
+  let importFinished;
+  const importFinishedPromise = new Promise((resolve) => { importFinished = resolve; });
+  let alertMessage = null;
+  page.on('dialog', async (d) => {
+    if (d.type() === 'alert') { alertMessage = d.message(); importFinished(); }
+    await d.accept();
+  });
+
+  await page.locator('#import-json').setInputFiles({ name: 'no-id.json', mimeType: 'application/json', buffer: Buffer.from(payload, 'utf8') });
+  await importFinishedPromise;
+
+  expect(alertMessage).toContain('匯入完成');
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('無編號的角色');
+});
+
 test('exporting projects with different Chinese names produces distinct filenames that retain the Chinese name', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
   const [download1] = await Promise.all([
