@@ -42,6 +42,7 @@ export async function renderGraphTab(projectId, container) {
       <select id="r-source">${entities.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <select id="r-target">${entities.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select>
       <input id="r-type" placeholder="關係類型（敵對/從屬/師徒…）">
+      <textarea id="r-notes" placeholder="關係描述（選填）"></textarea>
       <button id="r-add" type="button">新增</button>
     </section>
     <div id="cy" style="width:100%;height:500px;border:1px solid #ccc;"></div>
@@ -49,7 +50,13 @@ export async function renderGraphTab(projectId, container) {
       ${relations.map((r) => `
         <li data-id="${r.id}">
           <span>${esc((entityById[r.sourceId] || {}).name || '（已刪除）')} —${esc(r.type)}→ ${esc((entityById[r.targetId] || {}).name || '（已刪除）')}</span>
+          <p class="relation-notes">${esc(r.notes || '')}</p>
+          <button class="r-toggle-notes" type="button">編輯描述</button>
           <button class="r-delete" type="button">刪除</button>
+          <div class="relation-notes-editor" hidden>
+            <textarea class="r-notes-edit" placeholder="關係描述（選填）">${esc(r.notes)}</textarea>
+            <button class="r-notes-save" type="button">儲存描述</button>
+          </div>
         </li>`).join('')}
     </ul>
   `;
@@ -79,8 +86,9 @@ export async function renderGraphTab(projectId, container) {
     const sourceId = container.querySelector('#r-source').value;
     const targetId = container.querySelector('#r-target').value;
     const type = container.querySelector('#r-type').value.trim();
+    const notes = container.querySelector('#r-notes').value.trim();
     if (!sourceId || !targetId || !type) return;
-    await putRecord(projectId, 'relations', { sourceId, targetId, type });
+    await putRecord(projectId, 'relations', { sourceId, targetId, type, notes });
     renderGraphTab(projectId, container);
   });
 
@@ -93,6 +101,34 @@ export async function renderGraphTab(projectId, container) {
       const id = btn.closest('li').dataset.id;
       if (!confirm('確定要刪除這筆關係？')) return;
       await deleteRecord(projectId, 'relations', id);
+      renderGraphTab(projectId, container);
+    });
+  });
+
+  // extract.js has always written a `notes` field onto AI-proposed relations
+  // (the model's reasoning for why the relation exists), and a hand-added
+  // relation has no way to record why it exists either — but until now no UI
+  // ever showed or collected it, so that text was silently invisible. Toggle
+  // pattern matches chapters.js's 正文 editor: collapsed by default, revealed
+  // on demand, saved back onto the EXISTING record via putRecord so the
+  // relation's id/sourceId/targetId survive the edit.
+  container.querySelectorAll('.r-toggle-notes').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const editor = btn.closest('li').querySelector('.relation-notes-editor');
+      const opening = editor.hidden;
+      editor.hidden = !opening;
+      btn.textContent = opening ? '收合描述' : '編輯描述';
+    });
+  });
+
+  container.querySelectorAll('.r-notes-save').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const li = btn.closest('li');
+      const id = li.dataset.id;
+      const relation = relations.find((r) => r.id === id);
+      if (!relation) return;
+      const notes = li.querySelector('.r-notes-edit').value.trim();
+      await putRecord(projectId, 'relations', { ...relation, notes });
       renderGraphTab(projectId, container);
     });
   });

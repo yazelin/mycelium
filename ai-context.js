@@ -24,7 +24,7 @@ export async function buildContext(projectId) {
     '【設定庫】',
     ...entities.map((e) => `- ${e.name}${e.aliases && e.aliases.length ? `（別名：${e.aliases.join('、')}）` : ''}［${e.type || '未分類'}］：${e.notes || ''}`),
     '【人物關係】',
-    ...validRelations.map((r) => `- ${(entityById[r.sourceId] || {}).name || '?'} —${r.type}→ ${(entityById[r.targetId] || {}).name || '?'}`),
+    ...validRelations.map((r) => `- ${(entityById[r.sourceId] || {}).name || '?'} —${r.type}→ ${(entityById[r.targetId] || {}).name || '?'}${r.notes ? `：${r.notes}` : ''}`),
     '【伏筆】',
     ...foreshadow.map((f) => `- ${f.title}［${f.status}］：${f.notes || ''}`),
     '【最近章節摘要】',
