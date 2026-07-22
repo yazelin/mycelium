@@ -26,13 +26,24 @@ export async function renderChaptersTab(projectId, container) {
         const hasContent = !!(c.content && c.content.trim());
         return `
         <li data-id="${c.id}">
-          <strong>第${c.volume}卷・${esc(c.title)}</strong>
-          <select class="c-status-select">${CHAPTER_STATUSES.map((s) => `<option${s === c.status ? ' selected' : ''}>${s}</option>`).join('')}</select>
-          <span class="wordcount">${c.wordCount || 0} 字</span>
-          <span class="content-indicator${hasContent ? ' has-content' : ''}">${hasContent ? `正文 ${c.content.length} 字` : '尚無正文'}</span>
-          <button class="c-toggle-content" type="button">檢視正文</button>
-          <button class="c-delete" type="button">刪除</button>
-          <p>${esc(c.summary)}</p>
+          <div class="chapter-view">
+            <strong>第${c.volume}卷・${esc(c.title)}</strong>
+            <select class="c-status-select">${CHAPTER_STATUSES.map((s) => `<option${s === c.status ? ' selected' : ''}>${s}</option>`).join('')}</select>
+            <span class="wordcount">${c.wordCount || 0} 字</span>
+            <span class="content-indicator${hasContent ? ' has-content' : ''}">${hasContent ? `正文 ${c.content.length} 字` : '尚無正文'}</span>
+            <button class="c-edit-toggle" type="button">編輯</button>
+            <button class="c-toggle-content" type="button">檢視正文</button>
+            <button class="c-delete" type="button">刪除</button>
+            <p>${esc(c.summary)}</p>
+          </div>
+          <div class="chapter-edit" hidden>
+            <input class="c-edit-volume" type="number" value="${c.volume}" placeholder="卷數">
+            <input class="c-edit-title" value="${esc(c.title)}" placeholder="章節標題">
+            <input class="c-edit-wordcount" type="number" value="${c.wordCount || 0}" placeholder="字數">
+            <textarea class="c-edit-summary" placeholder="大綱摘要">${esc(c.summary)}</textarea>
+            <button class="c-edit-save" type="button">儲存</button>
+            <button class="c-edit-cancel" type="button">取消</button>
+          </div>
           <div class="chapter-content-editor" hidden>
             <textarea class="c-content-edit" placeholder="正文（選填）">${esc(c.content)}</textarea>
             <button class="c-content-save" type="button">儲存正文</button>
@@ -113,6 +124,53 @@ export async function renderChaptersTab(projectId, container) {
       if (!chapter) return;
       const content = li.querySelector('.c-content-edit').value.trim();
       await putRecord(projectId, 'chapters', { ...chapter, content });
+      renderChaptersTab(projectId, container);
+    });
+  });
+
+  // Last piece of #3 for chapters: title/volume/summary/wordCount were still
+  // delete+recreate-only (only status and 正文 had gotten the id-preserving
+  // treatment above). Same toggle-to-a-per-row-form approach as entities.js,
+  // kept as its own edit affordance separate from the 正文 viewer/editor above.
+  container.querySelectorAll('.c-edit-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const li = btn.closest('li');
+      li.querySelector('.chapter-view').hidden = true;
+      li.querySelector('.chapter-edit').hidden = false;
+    });
+  });
+
+  container.querySelectorAll('.c-edit-cancel').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const li = btn.closest('li');
+      const id = li.dataset.id;
+      const chapter = chapters.find((c) => c.id === id);
+      if (chapter) {
+        li.querySelector('.c-edit-volume').value = chapter.volume;
+        li.querySelector('.c-edit-title').value = chapter.title;
+        li.querySelector('.c-edit-wordcount').value = chapter.wordCount || 0;
+        li.querySelector('.c-edit-summary').value = chapter.summary;
+      }
+      li.querySelector('.chapter-edit').hidden = true;
+      li.querySelector('.chapter-view').hidden = false;
+    });
+  });
+
+  container.querySelectorAll('.c-edit-save').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const li = btn.closest('li');
+      const id = li.dataset.id;
+      const chapter = chapters.find((c) => c.id === id);
+      if (!chapter) return;
+      const title = li.querySelector('.c-edit-title').value.trim();
+      if (!title) return;
+      await putRecord(projectId, 'chapters', {
+        ...chapter,
+        volume: +li.querySelector('.c-edit-volume').value || 1,
+        title,
+        wordCount: +li.querySelector('.c-edit-wordcount').value || 0,
+        summary: li.querySelector('.c-edit-summary').value.trim(),
+      });
       renderChaptersTab(projectId, container);
     });
   });

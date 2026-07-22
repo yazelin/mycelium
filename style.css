@@ -20,3 +20,4 @@ li.overdue { background: #fde2e2; }
 .content-indicator { color: #666; font-size: .85em; }
 .content-indicator.has-content { color: #2d4a3e; font-weight: bold; }
 .chapter-content-editor { margin-top: .5rem; }
+.entity-edit, .chapter-edit, .foreshadow-edit { margin-top: .5rem; display: flex; flex-direction: column; gap: .35rem; max-width: 30rem; }
