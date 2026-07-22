@@ -3,13 +3,18 @@ import { test, expect } from '@playwright/test';
 async function makeProject(page, name) {
   page.once('dialog', (d) => d.accept(name));
   await page.locator('#project-new').click();
-  await page.waitForTimeout(100);
+  // Wait for new project to appear in select (look for the project name text in options)
+  await expect(page.locator('#project-select')).toContainText(name);
 }
 
 async function addEntity(page, name) {
-  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  // Wait for input field to be ready
-  await page.locator('#e-name').waitFor({ state: 'visible' });
+  // Only click tab if not already active (avoid redundant re-render race)
+  const tabBtn = page.locator('.tab-btn', { hasText: '設定庫' });
+  if (!(await tabBtn.evaluate(el => el.classList.contains('active')))) {
+    await tabBtn.click();
+    // Wait for render to settle if we triggered a tab switch
+    await expect(page.locator('.entity-list')).toBeVisible();
+  }
   const prevCount = await page.locator('.entity-list li').count();
   await page.locator('#e-name').fill(name);
   await page.locator('#e-add').click();
