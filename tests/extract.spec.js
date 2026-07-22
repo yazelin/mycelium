@@ -74,3 +74,35 @@ test('extracting text produces candidates; applying merges aliases and links rel
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
   await expect(page.locator('.foreshadow-list li', { hasText: '陸修的真實身份' })).toHaveCount(1);
 });
+
+test('alias candidate listed before its new-entity target still merges without creating a duplicate', async ({ page }) => {
+  // Reverse of MOCK_EXTRACTION's entity order: the alias candidate comes
+  // first, its aliasOf target ("魔王") is only created afterwards. This is
+  // exactly the ordering the AI has no instruction to avoid, and the bug
+  // this test guards against is a silently-created orphan second entity.
+  const REORDERED_EXTRACTION = {
+    ...MOCK_EXTRACTION,
+    entities: [
+      { name: '系統管理員陳先生', aliasOf: '魔王', type: null, notes: null, reason: '本章揭露魔王其實就是系統管理員陳先生' },
+      { name: '魔王', aliasOf: null, type: '人物', notes: '追殺主角的勢力領袖', reason: '首次登場的新角色' },
+    ],
+  };
+  await page.route('**/chat/completions', async (route) => {
+    await route.fulfill({ json: { choices: [{ message: { role: 'assistant', content: JSON.stringify(REORDERED_EXTRACTION) } }] } });
+  });
+
+  await page.locator('#ex-text').fill('（章節全文……）');
+  await page.locator('#ex-run').click();
+
+  await expect(page.locator('#ex-entities li')).toHaveCount(2);
+  await expect(page.locator('#ex-entities li').nth(0)).toContainText('合併為「魔王」的別名');
+
+  const applyDialog = page.waitForEvent('dialog');
+  await page.locator('#ex-apply').click();
+  await (await applyDialog).accept();
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const villain = page.locator('.entity-list li', { hasText: '魔王' });
+  await expect(villain).toContainText('系統管理員陳先生'); // merged as alias, not a separate entity
+  await expect(page.locator('.entity-list li')).toHaveCount(2); // 陸修 + 魔王 only, no duplicate/orphan
+});

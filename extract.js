@@ -84,22 +84,41 @@ function renderCandidates(projectId, container, existingEntities, result) {
     // snapshot. The flagship scenario this app exists for is a name that is
     // BOTH a brand-new entity AND the alias target of another candidate in
     // the very same batch (e.g. "魔王" appears as a new entity, then later in
-    // the same extraction "系統管理員陳先生" is revealed as 魔王's alias). A
-    // snapshot taken before this loop runs would never contain 魔王, so the
-    // alias lookup below must see entities created earlier in this same loop.
+    // the same extraction "系統管理員陳先生" is revealed as 魔王's alias).
     const nameToEntity = Object.fromEntries(existingEntities.map((e) => [e.name, e]));
 
     const entityLis = [...box.querySelectorAll('#ex-entities li')];
+
+    // Two passes, not one: the AI response is a flat array with no guaranteed
+    // ordering between a new entity and candidates that alias it — a chapter
+    // could plausibly introduce "系統管理員陳先生" before revealing "魔王" is
+    // the same person, so the alias candidate can appear before its target.
+    // Pass 1 creates every plain new-entity candidate first, so pass 2's
+    // alias lookups always see a complete nameToEntity map regardless of the
+    // order the AI listed candidates in.
     for (let i = 0; i < entityLis.length; i++) {
       if (!entityLis[i].querySelector('input').checked) continue;
       const c = entityCandidates[i];
-      if (c.aliasOf && nameToEntity[c.aliasOf]) {
+      if (c.aliasOf) continue;
+      const created = await putRecord(projectId, 'entities', { name: c.name, aliases: [], type: c.type || '', tags: [], notes: c.notes || '' });
+      nameToEntity[c.name] = created;
+    }
+
+    for (let i = 0; i < entityLis.length; i++) {
+      if (!entityLis[i].querySelector('input').checked) continue;
+      const c = entityCandidates[i];
+      if (!c.aliasOf) continue;
+      if (nameToEntity[c.aliasOf]) {
         const target = nameToEntity[c.aliasOf];
         const aliases = Array.from(new Set([...(target.aliases || []), c.name]));
         const merged = await putRecord(projectId, 'entities', { ...target, aliases });
         nameToEntity[target.name] = merged;
         nameToEntity[c.name] = merged; // so a later candidate can alias by this new name too
       } else {
+        // aliasOf target doesn't exist anywhere (existing entities or pass 1
+        // creations) — the AI referenced something that doesn't exist at
+        // all. Keep the current fallback: create it as its own entity rather
+        // than silently dropping the candidate.
         const created = await putRecord(projectId, 'entities', { name: c.name, aliases: [], type: c.type || '', tags: [], notes: c.notes || '' });
         nameToEntity[c.name] = created;
       }
