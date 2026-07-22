@@ -29,7 +29,15 @@ export async function syncToGithub(projectId) {
     const url = `https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${path}`;
     let sha;
     const getRes = await ghFetch(url);
-    if (getRes.ok) sha = (await getRes.json()).sha;
+    if (getRes.ok) {
+      sha = (await getRes.json()).sha;
+    } else if (getRes.status !== 404) {
+      const d = await getRes.json().catch(() => ({}));
+      throw new Error(
+        `無法確認 ${store} 是否已存在（HTTP ${getRes.status}），請確認 GitHub PAT 是否正確、未過期或權限足夠。` +
+        (d.message ? `（GitHub 訊息：${d.message}）` : '')
+      );
+    }
     const content = b64EncodeUtf8(JSON.stringify(data[store], null, 2));
     const putRes = await ghFetch(url, {
       method: 'PUT',
