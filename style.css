@@ -17,3 +17,6 @@ li.overdue { background: #fde2e2; }
 .ai-msg.error { background: #fde2e2; color: #a33; }
 .ai-msg.pending { color: #666; font-style: italic; }
 #ai-send:disabled { opacity: .6; cursor: not-allowed; }
+.content-indicator { color: #666; font-size: .85em; }
+.content-indicator.has-content { color: #2d4a3e; font-weight: bold; }
+.chapter-content-editor { margin-top: .5rem; }

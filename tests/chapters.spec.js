@@ -92,3 +92,77 @@ test('changing a chapter status via the inline select updates progress stats and
   await expect(page.locator('.foreshadow-list li')).toContainText('埋設：測試章');
   await expect(page.locator('.foreshadow-list li')).not.toContainText('未設定');
 });
+
+test('body text saved on chapter creation shows a content indicator and is viewable via the toggle', async ({ page }) => {
+  await page.locator('#c-title').fill('有正文的章節');
+  await page.locator('#c-content').fill('這是第一段正文，用來確認稿子沒有不見。');
+  await page.locator('#c-add').click();
+
+  const li = page.locator('.chapter-list li');
+  await expect(li).toHaveCount(1);
+  await expect(li.locator('.content-indicator')).toHaveClass(/has-content/);
+  await expect(li.locator('.content-indicator')).toContainText('字');
+
+  // Textarea exists in the DOM but stays hidden until the user asks to see it.
+  await expect(li.locator('.c-content-edit')).toBeHidden();
+  await li.locator('.c-toggle-content').click();
+  await expect(li.locator('.c-content-edit')).toBeVisible();
+  await expect(li.locator('.c-content-edit')).toHaveValue('這是第一段正文，用來確認稿子沒有不見。');
+});
+
+test('a chapter with no content shows a 尚無正文 indicator instead of a character count', async ({ page }) => {
+  await page.locator('#c-title').fill('空章節');
+  await page.locator('#c-add').click();
+
+  const li = page.locator('.chapter-list li');
+  await expect(li.locator('.content-indicator')).toHaveText('尚無正文');
+  await expect(li.locator('.content-indicator')).not.toHaveClass(/has-content/);
+});
+
+test('editing 正文 via the inline editor persists across a reload', async ({ page }) => {
+  await page.locator('#c-title').fill('可編輯章節');
+  await page.locator('#c-content').fill('初版正文。');
+  await page.locator('#c-add').click();
+
+  const li = page.locator('.chapter-list li');
+  await li.locator('.c-toggle-content').click();
+  await li.locator('.c-content-edit').fill('修訂後的正文，字數不同。');
+  await li.locator('.c-content-save').click();
+
+  await expect(li.locator('.content-indicator')).toContainText(String('修訂後的正文，字數不同。'.length));
+
+  await page.reload();
+  const btn = page.locator('.tab-btn', { hasText: '大綱' });
+  if (!(await btn.evaluate((el) => el.classList.contains('active')))) await btn.click();
+
+  const reloadedLi = page.locator('.chapter-list li');
+  await reloadedLi.locator('.c-toggle-content').click();
+  await expect(reloadedLi.locator('.c-content-edit')).toHaveValue('修訂後的正文，字數不同。');
+});
+
+test('editing 正文 preserves the chapter id (a foreshadow pointing at it keeps resolving)', async ({ page }) => {
+  await page.locator('#c-volume').fill('1');
+  await page.locator('#c-title').fill('伏筆依附章');
+  await page.locator('#c-content').fill('初版正文。');
+  await page.locator('#c-add').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await page.locator('#f-title').fill('依附伏筆');
+  await page.locator('#f-plant').selectOption({ label: '第1卷・伏筆依附章' });
+  await page.locator('#f-add').click();
+  await expect(page.locator('.foreshadow-list li')).toHaveCount(1);
+  await expect(page.locator('.foreshadow-list li')).toContainText('埋設：伏筆依附章');
+
+  await page.locator('.tab-btn', { hasText: '大綱' }).click();
+  const li = page.locator('.chapter-list li');
+  await li.locator('.c-toggle-content').click();
+  await li.locator('.c-content-edit').fill('編輯後的正文。');
+  await li.locator('.c-content-save').click();
+  // still exactly one chapter row — proves this was an update, not a delete+recreate
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await expect(page.locator('.foreshadow-list li')).toContainText('埋設：伏筆依附章');
+  await expect(page.locator('.foreshadow-list li')).not.toContainText('未設定');
+});
