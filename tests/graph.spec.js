@@ -154,6 +154,72 @@ test('switching away from 關係圖 destroys its Cytoscape instance', async ({ p
   expect(prevDestroyed).toBe(true);
 });
 
+test('a relation added with a description shows it in the relation list', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('#r-source option')).toHaveCount(2);
+  await page.locator('#r-source').selectOption({ label: '林小雨' });
+  await page.locator('#r-target').selectOption({ label: '城主' });
+  await page.locator('#r-type').fill('敵對');
+  await page.locator('#r-notes').fill('城主曾殺害林小雨的師父');
+  await page.locator('#r-add').click();
+
+  await expect(page.locator('.relation-list li')).toHaveCount(1);
+  await expect(page.locator('.relation-notes')).toHaveText('城主曾殺害林小雨的師父');
+});
+
+test('editing a relation description persists across reload and preserves the relation id', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('#r-source option')).toHaveCount(2);
+  await page.locator('#r-source').selectOption({ label: '林小雨' });
+  await page.locator('#r-target').selectOption({ label: '城主' });
+  await page.locator('#r-type').fill('敵對');
+  await page.locator('#r-add').click();
+  await expect(page.locator('.relation-list li')).toHaveCount(1);
+
+  const idBefore = await page.locator('.relation-list li').getAttribute('data-id');
+
+  await page.locator('.r-toggle-notes').click();
+  await page.locator('.r-notes-edit').fill('後來查明是誤會一場');
+  await page.locator('.r-notes-save').click();
+
+  await expect(page.locator('.relation-notes')).toHaveText('後來查明是誤會一場');
+  const idAfterSave = await page.locator('.relation-list li').getAttribute('data-id');
+  expect(idAfterSave).toBe(idBefore);
+
+  await page.reload();
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('.relation-list li')).toHaveCount(1);
+  await expect(page.locator('.relation-notes')).toHaveText('後來查明是誤會一場');
+  const idAfterReload = await page.locator('.relation-list li').getAttribute('data-id');
+  expect(idAfterReload).toBe(idBefore);
+});
+
+test('a relation written with notes by the extraction flow displays that text', async ({ page }) => {
+  // Simulate what extract.js's putRecord('relations', { sourceId, targetId, type, notes }) writes
+  // — the AI-extraction path is exercised separately in tests/extract.spec.js; this test only
+  // proves graph.js renders `notes` regardless of how the record got there.
+  // Read the two entities created in beforeEach directly from IndexedDB so we can
+  // write a relation with the same shape extract.js uses, without going through the UI form.
+  const ids = await page.evaluate(async () => {
+    const { getAllRecords } = await import('/db.js');
+    const select = document.querySelector('#project-select');
+    const projectId = select.value;
+    const entities = await getAllRecords(projectId, 'entities');
+    const bySourceName = entities.find((e) => e.name === '林小雨');
+    const byTargetName = entities.find((e) => e.name === '城主');
+    return { projectId, sourceId: bySourceName.id, targetId: byTargetName.id };
+  });
+
+  await page.evaluate(async ({ projectId, sourceId, targetId }) => {
+    const { putRecord } = await import('/db.js');
+    await putRecord(projectId, 'relations', { sourceId, targetId, type: '敵對', notes: 'AI 判斷：兩人曾在同一場戰役交手' });
+  }, ids);
+
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('.relation-list li')).toHaveCount(1);
+  await expect(page.locator('.relation-notes')).toHaveText('AI 判斷：兩人曾在同一場戰役交手');
+});
+
 test('repeated visits to 關係圖 never leave more than one live Cytoscape instance', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '關係圖' }).click();
   await expect(page.locator('#cy')).toBeVisible();
