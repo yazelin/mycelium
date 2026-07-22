@@ -7,7 +7,28 @@ export async function collectProjectData(projectId) {
   return data;
 }
 
+// A record must be a plain, non-null, non-array object for putRecord/IndexedDB
+// to accept it (putRecord reads/writes `.id` on it). Anything else (numbers,
+// strings, null, arrays, ...) throws once written, but only after
+// replaceProjectData has already deleted the store's existing records — so
+// this must be checked up front, not discovered mid-write.
+function isPlainRecord(rec) {
+  return rec !== null && typeof rec === 'object' && !Array.isArray(rec);
+}
+
 export async function replaceProjectData(projectId, data) {
+  // Validate every record in every store before touching the database. Any
+  // caller of this function (importProjectJson, GitHub import, ...) gets the
+  // same guarantee: a bad element anywhere means nothing is deleted anywhere,
+  // rather than the previous behaviour where the delete-then-write loop for
+  // one store already emptied it before the bad element in it was reached.
+  for (const store of PROJECT_STORES) {
+    for (const rec of (data[store] || [])) {
+      if (!isPlainRecord(rec)) {
+        throw new Error(`備份資料中的「${store}」含有無效的紀錄，未變更任何資料。`);
+      }
+    }
+  }
   for (const store of PROJECT_STORES) {
     const existing = await getAllRecords(projectId, store);
     for (const rec of existing) await deleteRecord(projectId, store, rec.id);
@@ -15,14 +36,17 @@ export async function replaceProjectData(projectId, data) {
   }
 }
 
-// A parsed backup file must be a plain object carrying at least one
-// PROJECT_STORES array, or replaceProjectData's `data[store] || []` silently
-// treats every store as empty and wipes the project. Checked before any
-// destructive call so a wrong-shaped file (e.g. an unrelated JSON the user
-// picked by mistake) changes nothing.
+// A parsed backup file must be a plain object carrying EVERY PROJECT_STORES
+// key as an array. A genuine export from this app always has all five
+// (collectProjectData always writes every store, even as `[]`), so requiring
+// all of them doesn't reject real backups. Anything less — e.g. a
+// hand-trimmed file with only one store key — used to pass under `.some()`,
+// and replaceProjectData's `data[store] || []` would then silently treat
+// every *missing* store as empty and wipe it. Checked before any destructive
+// call so a wrong-shaped or partial file changes nothing.
 export function isValidProjectData(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
-  return PROJECT_STORES.some((store) => Array.isArray(data[store]));
+  return PROJECT_STORES.every((store) => Array.isArray(data[store]));
 }
 
 // Characters that are genuinely unsafe in filenames: path separators, other

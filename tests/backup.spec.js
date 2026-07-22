@@ -147,6 +147,86 @@ test('importing malformed (unparseable) JSON shows a readable error and changes 
   await expect(item).toContainText('陸修');
 });
 
+test('importing a payload missing some store keys is rejected and leaves all data intact, including stores omitted from the payload', async ({ page }) => {
+  // Seed a second store (chapters) so we have pre-existing data in a store
+  // the bad payload below never mentions. The old `.some()` check accepted
+  // this payload (it has one valid PROJECT_STORES array) and
+  // replaceProjectData's `data[store] || []` then silently wiped every store
+  // not present in the payload, including this one.
+  await page.locator('.tab-btn', { hasText: '大綱' }).click();
+  await page.locator('#c-title').fill('不應被清空的章節');
+  await page.locator('#c-add').click();
+  await expect(page.locator('.chapter-list li')).toHaveCount(1);
+
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  // Only `entities` present — relations/chapters/foreshadow/chatlogs missing.
+  const payload = JSON.stringify({
+    entities: [{ id: 'e-partial', name: '不應該出現的角色', aliases: [], type: '', tags: [], notes: '' }],
+  });
+
+  let importFinished;
+  const importFinishedPromise = new Promise((resolve) => { importFinished = resolve; });
+  let alertMessage = null;
+  page.on('dialog', async (d) => {
+    if (d.type() === 'alert') { alertMessage = d.message(); importFinished(); }
+    await d.accept();
+  });
+
+  await page.locator('#import-json').setInputFiles({ name: 'partial.json', mimeType: 'application/json', buffer: Buffer.from(payload, 'utf8') });
+  await importFinishedPromise;
+
+  expect(alertMessage).not.toContain('匯入完成');
+  expect(alertMessage).toContain('不是 mycelium 的備份檔');
+
+  // The store present in the payload (entities) must be untouched too — a
+  // rejected import changes nothing anywhere, not just in the omitted stores.
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const entityItem = page.locator('.entity-list li');
+  await expect(entityItem).toHaveCount(1);
+  await expect(entityItem).toContainText('陸修');
+
+  // The store omitted from the payload must still have its pre-existing data.
+  await page.locator('.tab-btn', { hasText: '大綱' }).click();
+  const chapterItem = page.locator('.chapter-list li');
+  await expect(chapterItem).toHaveCount(1);
+  await expect(chapterItem).toContainText('不應被清空的章節');
+});
+
+test('importing a correctly-shaped payload with garbage array elements is rejected and leaves pre-existing data intact', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  // Correct outer shape (all five PROJECT_STORES keys present as arrays), but
+  // `entities` contains non-object elements. replaceProjectData used to
+  // delete all of a store's existing records before writing the new ones, so
+  // putRecord throwing on `1` (mid-store) meant entities was already emptied
+  // even though the user is correctly told the import failed.
+  const payload = JSON.stringify({
+    entities: [1, null],
+    relations: [],
+    chapters: [],
+    foreshadow: [],
+    chatlogs: [],
+  });
+
+  let importFinished;
+  const importFinishedPromise = new Promise((resolve) => { importFinished = resolve; });
+  let alertMessage = null;
+  page.on('dialog', async (d) => {
+    if (d.type() === 'alert') { alertMessage = d.message(); importFinished(); }
+    await d.accept();
+  });
+
+  await page.locator('#import-json').setInputFiles({ name: 'garbage-elements.json', mimeType: 'application/json', buffer: Buffer.from(payload, 'utf8') });
+  await importFinishedPromise;
+
+  expect(alertMessage).not.toContain('匯入完成');
+  expect(alertMessage).toContain('匯入失敗');
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('陸修');
+});
+
 test('exporting projects with different Chinese names produces distinct filenames that retain the Chinese name', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
   const [download1] = await Promise.all([
