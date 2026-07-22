@@ -91,3 +91,86 @@ test('dismissing the import confirm dialog leaves local data untouched', async (
   await expect(item).toHaveCount(1);
   await expect(item).toContainText('陸修');
 });
+
+test('importing a wrong-shaped JSON file leaves existing data intact and reports an error, not success', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  // Syntactically valid JSON, but not shaped like a mycelium backup at all
+  // (no PROJECT_STORES keys) — exactly the "picked the wrong file" case from
+  // the finding. Must be rejected before any destructive write, not silently
+  // treated as "every store is empty".
+  const payload = JSON.stringify({ foo: 1 });
+
+  // Same persistent-dialog-handler pattern as the successful-import test
+  // above: confirm() fires first (accepted), then the import handler's own
+  // alert (success or error) is the completion signal — no fixed timeout.
+  let importFinished;
+  const importFinishedPromise = new Promise((resolve) => { importFinished = resolve; });
+  let alertMessage = null;
+  page.on('dialog', async (d) => {
+    if (d.type() === 'alert') { alertMessage = d.message(); importFinished(); }
+    await d.accept();
+  });
+
+  await page.locator('#import-json').setInputFiles({ name: 'wrong-shape.json', mimeType: 'application/json', buffer: Buffer.from(payload, 'utf8') });
+  await importFinishedPromise;
+
+  expect(alertMessage).not.toContain('匯入完成');
+  expect(alertMessage).toContain('不是 mycelium 的備份檔');
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('陸修');
+});
+
+test('importing malformed (unparseable) JSON shows a readable error and changes nothing', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  const payload = '{ this is not valid json,,,';
+
+  let importFinished;
+  const importFinishedPromise = new Promise((resolve) => { importFinished = resolve; });
+  let alertMessage = null;
+  page.on('dialog', async (d) => {
+    if (d.type() === 'alert') { alertMessage = d.message(); importFinished(); }
+    await d.accept();
+  });
+
+  await page.locator('#import-json').setInputFiles({ name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from(payload, 'utf8') });
+  await importFinishedPromise;
+
+  expect(alertMessage).not.toContain('匯入完成');
+  expect(alertMessage).toBeTruthy();
+
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('陸修');
+});
+
+test('exporting projects with different Chinese names produces distinct filenames that retain the Chinese name', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  const [download1] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('#export-json').click(),
+  ]);
+  const filename1 = download1.suggestedFilename();
+  expect(filename1).toContain('備份測試');
+
+  // Create a second project with a different, all-Chinese name and export
+  // it too — the old ASCII-only `\w` sanitizer collapsed every Chinese name
+  // down to the same "mycelium-_.json", so two projects would silently
+  // overwrite each other's export in the Downloads folder.
+  page.once('dialog', (d) => d.accept('轉生token無限'));
+  await page.locator('#project-new').click();
+  await page.waitForTimeout(100);
+
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  const [download2] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('#export-json').click(),
+  ]);
+  const filename2 = download2.suggestedFilename();
+
+  expect(filename2).toContain('轉生');
+  expect(filename2).not.toBe(filename1);
+});

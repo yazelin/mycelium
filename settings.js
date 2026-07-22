@@ -107,7 +107,25 @@ export async function renderSettingsTab(projectId, container) {
     const file = e.target.files[0];
     if (!file) return;
     if (!confirm('匯入會覆蓋目前作品的資料，確定？')) return;
-    await importProjectJson(projectId, JSON.parse(await file.text()));
-    alert('匯入完成，請切換分頁查看。');
+    // Parse and import are each wrapped so a bad file (unparseable JSON,
+    // wrong shape, or a write failure partway through) surfaces a readable
+    // Chinese error instead of an unhandled rejection or a false success
+    // alert — importProjectJson itself validates shape before doing any
+    // destructive write, so nothing is changed on failure.
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch (err) {
+      alert('這個檔案不是有效的 JSON，未匯入任何資料。');
+      e.target.value = '';
+      return;
+    }
+    try {
+      await importProjectJson(projectId, data);
+      alert('匯入完成，請切換分頁查看。');
+    } catch (err) {
+      alert('匯入失敗：' + err.message);
+    }
+    e.target.value = '';
   });
 }
