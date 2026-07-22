@@ -28,7 +28,7 @@
 
 - Vanilla JS ES modules，無 build 步驟，直接 `index.html` + 拆分的 `.js` 模組
 - `vendor/cytoscape.js`：人物關係圖視覺化（節點可拖拉）
-- `vendor/idb-keyval.js`：IndexedDB 極簡封裝（取代 localStorage 的 5–10MB 容量上限，因為要存完整章節文字與聊天紀錄）
+- 資料層直接寫在 `db.js`，用原生 IndexedDB API 包一層極簡 promise 封裝（取代 localStorage 的 5–10MB 容量上限，因為要存完整章節文字與聊天紀錄）；不額外 vendor idb-keyval 之類的函式庫，原生 API 幾十行就寫完，不需要多一個依賴
 - Playwright 測關鍵流程；`python3 -m http.server` 本地預覽
 - GitHub Pages 直接從 repo root 發布，無 CI build 步驟
 
