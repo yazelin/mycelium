@@ -3,6 +3,7 @@ import { listProjects, createProject, deleteProjectMeta } from './db.js';
 import { renderEntitiesTab } from './entities.js';
 import { renderGraphTab } from './graph.js';
 import { renderChaptersTab } from './chapters.js';
+import { renderForeshadowTab } from './foreshadow.js';
 
 // Later tasks add one `import { renderXTab } from './x.js'` + one
 // `TABS.x = { label: '...', render: renderXTab };` line each. Keep this
@@ -12,6 +13,7 @@ const TABS = {};
 TABS.entities = { label: '設定庫', render: renderEntitiesTab };
 TABS.graph = { label: '關係圖', render: renderGraphTab };
 TABS.chapters = { label: '大綱', render: renderChaptersTab };
+TABS.foreshadow = { label: '伏筆追蹤', render: renderForeshadowTab };
 
 let currentProjectId = null;
 let currentTab = null;
