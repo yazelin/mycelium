@@ -1,6 +1,7 @@
 'use strict';
 import { listProjects, createProject, deleteProjectMeta } from './db.js';
 import { renderEntitiesTab } from './entities.js';
+import { renderGraphTab } from './graph.js';
 
 // Later tasks add one `import { renderXTab } from './x.js'` + one
 // `TABS.x = { label: '...', render: renderXTab };` line each. Keep this
@@ -8,6 +9,7 @@ import { renderEntitiesTab } from './entities.js';
 // caller already has direct access to this module at build time.
 const TABS = {};
 TABS.entities = { label: '設定庫', render: renderEntitiesTab };
+TABS.graph = { label: '關係圖', render: renderGraphTab };
 
 let currentProjectId = null;
 let currentTab = null;
