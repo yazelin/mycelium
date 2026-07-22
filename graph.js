@@ -2,7 +2,26 @@
 import { getAllRecords, putRecord, deleteRecord } from './db.js';
 import { esc } from './util.js';
 
+// The one live object this codebase's render*Tab(projectId, container) + innerHTML
+// pattern doesn't account for: a Cytoscape instance keeps window listeners and an
+// animation loop alive even after its container's innerHTML is discarded. Track it
+// here so every entry point (a fresh render, a recursive re-render from #r-add /
+// .r-delete, or app.js tearing the tab down on tab-switch) destroys the previous
+// instance before the DOM node it's attached to is thrown away.
+let cyInstance = null;
+
+function destroyCy() {
+  if (cyInstance && !cyInstance.destroyed()) cyInstance.destroy();
+  cyInstance = null;
+}
+
+// Exported for app.js's optional tab-teardown hook — see TABS.graph in app.js.
+export function destroyGraphTab() {
+  destroyCy();
+}
+
 export async function renderGraphTab(projectId, container) {
+  destroyCy(); // in case this is a re-render (add/delete relation) reusing the same container
   const [entities, relations] = await Promise.all([
     getAllRecords(projectId, 'entities'),
     getAllRecords(projectId, 'relations'),
@@ -49,6 +68,7 @@ export async function renderGraphTab(projectId, container) {
     layout: { name: 'cose' },
   });
   cyEl._cyInstance = cy; // test hook — inspected directly in tests/graph.spec.js
+  cyInstance = cy;
 
   cy.on('tap', 'node', (evt) => {
     const entity = entities.find((e) => e.id === evt.target.id());
