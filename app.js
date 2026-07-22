@@ -1,11 +1,13 @@
 'use strict';
 import { listProjects, createProject, deleteProjectMeta } from './db.js';
+import { renderEntitiesTab } from './entities.js';
 
 // Later tasks add one `import { renderXTab } from './x.js'` + one
 // `TABS.x = { label: '...', render: renderXTab };` line each. Keep this
 // object literal, don't refactor to a registration function — every
 // caller already has direct access to this module at build time.
 const TABS = {};
+TABS.entities = { label: '設定庫', render: renderEntitiesTab };
 
 let currentProjectId = null;
 let currentTab = null;
