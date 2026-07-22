@@ -46,7 +46,7 @@
 
 | 類型 | 說明 |
 |---|---|
-| Entity | 人物/地點/勢力/概念設定；統一 schema（id/name/type/tags/notes）+ 自訂欄位 |
+| Entity | 人物/地點/勢力/概念設定；統一 schema（id/name/aliases/type/tags/notes）+ 自訂欄位。`aliases` 記別名/稱號/曾用名（例如「魔王」與「系統管理員」是同一人的不同稱呼），身份反轉類劇情靠這欄位避免同一角色被誤判成兩個 entity |
 | Relation | entity↔entity 的邊；type（敵對/從屬/師徒…）+ 描述；餵給 Cytoscape 畫圖，也是 AI context 的一部分 |
 | Chapter | 卷/章節大綱；狀態（未寫/草稿/完稿）、字數、摘要、可選存正文全文 |
 | Foreshadow | 伏筆條目：埋設章節、預計回收章節、狀態（埋設中/已回收/棄用）、關聯的 entity/relation id |
@@ -84,7 +84,7 @@ const PROVIDERS = {
 
 四個任務的 context 組裝：
 - **一致性檢查 / 反轉發想 / 自由問答**：組裝目前作品的 entities + relations + foreshadow 清單 + 最近章節摘要 當 system context
-- **抽取圖資料**：使用者貼上章節全文，AI 回傳建議清單（新 entity / 新 relation / 新 foreshadow，各帶建議理由），使用者逐條勾選確認後才寫入
+- **抽取圖資料**：使用者貼上章節全文，AI 連同現有 entities 的 name+aliases 清單一起送出比對，回傳建議清單（新 entity / 疑似既有角色的別名（附判斷理由與比對到的既有 entity）/ 新 relation / 新 foreshadow），使用者逐條勾選「新增」或「合併為別名」後才寫入
 
 ### GitHub 同步
 
