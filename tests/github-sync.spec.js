@@ -113,7 +113,7 @@ test('import round-trips Chinese entity content through base64 decode', async ({
   await expect(item).toContainText('主角，記憶來自另一個世界。');
 });
 
-test('import treats a 404 on a store file as an empty store instead of failing', async ({ page }) => {
+test('import refuses when every store 404s (nonexistent/typo repo, or not synced yet) instead of wiping the project', async ({ page }) => {
   await page.route('https://api.github.com/repos/yazelin/test-novel/contents/**', async (route) => {
     await route.fulfill({ status: 404, json: { message: 'Not Found' } });
   });
@@ -128,10 +128,47 @@ test('import treats a 404 on a store file as an empty store instead of failing',
   await page.locator('#gh-save').click();
 
   await page.locator('#gh-import').click();
+  await expect(page.locator('#gh-status')).toContainText('找不到任何', { timeout: 10_000 });
+
+  // Nothing must have changed locally — the 陸修 entity from beforeEach must survive.
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('陸修');
+});
+
+test('import proceeds when only some stores 404 (partial data is a legitimate state)', async ({ page }) => {
+  const remoteEntities = [
+    { id: 'e1', name: '魔王', aliases: [], type: '人物', tags: [], notes: '唯一遠端有資料的 store。' },
+  ];
+
+  await page.route('https://api.github.com/repos/yazelin/test-novel/contents/**', async (route) => {
+    const url = route.request().url();
+    if (url.endsWith('data/entities.json')) {
+      const content = Buffer.from(JSON.stringify(remoteEntities), 'utf8').toString('base64');
+      await route.fulfill({ json: { content, encoding: 'base64', sha: 'sha-entities' } });
+      return;
+    }
+    // relations/chapters/foreshadow/chatlogs all 404 — this is the "haven't
+    // synced those yet" case, distinct from "nothing at all in the repo".
+    await route.fulfill({ status: 404, json: { message: 'Not Found' } });
+  });
+
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  await page.locator('#gh-pat').fill('ghp_test');
+  await page.locator('#gh-owner').fill('yazelin');
+  await page.locator('#gh-name').fill('test-novel');
+
+  page.on('dialog', (d) => d.accept());
+  await page.locator('#gh-save').click();
+
+  await page.locator('#gh-import').click();
   await expect(page.locator('#gh-status')).toContainText('匯入完成', { timeout: 10_000 });
 
   await page.locator('.tab-btn', { hasText: '設定庫' }).click();
-  await expect(page.locator('.entity-list li')).toHaveCount(0);
+  const item = page.locator('.entity-list li');
+  await expect(item).toHaveCount(1);
+  await expect(item).toContainText('魔王'); // replaced the local 陸修 with the remote (partial) data
 });
 
 test('dismissing the import confirm dialog leaves local data untouched', async ({ page }) => {

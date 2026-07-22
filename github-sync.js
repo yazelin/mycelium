@@ -54,6 +54,7 @@ export async function syncToGithub(projectId) {
 export async function importFromGithub(projectId) {
   const repo = await projectRepo(projectId);
   const data = {};
+  let foundCount = 0; // how many stores actually resolved (as opposed to 404ing)
   for (const store of PROJECT_STORES) {
     const path = `data/${store}.json`;
     const url = `https://api.github.com/repos/${repo.owner}/${repo.name}/contents/${path}`;
@@ -62,6 +63,16 @@ export async function importFromGithub(projectId) {
     if (!res.ok) throw new Error(`讀取 ${store} 失敗（HTTP ${res.status}）`);
     const d = await res.json();
     data[store] = JSON.parse(b64DecodeUtf8(d.content));
+    foundCount++;
+  }
+  // A 404 on every single store is not "an empty project" — it's a nonexistent
+  // repo, a typo'd repo name, or a correctly-bound repo the user simply hasn't
+  // synced yet. Treating that as "five empty stores" used to feed
+  // replaceProjectData five empty arrays and silently delete the whole
+  // project. A *partial* result (some stores present, some 404 — e.g. synced
+  // entities but never chapters) is still a legitimate state and must import.
+  if (foundCount === 0) {
+    throw new Error('在這個 repo 找不到任何 data/*.json，未變更任何資料。');
   }
   await replaceProjectData(projectId, data);
 }
