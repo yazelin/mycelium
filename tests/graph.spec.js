@@ -87,7 +87,21 @@ test('deleting an entity that has a relation cascades the relation and leaves �
   await expect.poll(() => graphCounts(page), { timeout: 5000 }).toEqual({ nodes: 1, edges: 1 });
 });
 
-test('deleting a relation directly removes it from the graph', async ({ page }) => {
+test('dismissing the delete confirm on a relation leaves it in place', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '關係圖' }).click();
+  await expect(page.locator('#r-source option')).toHaveCount(2);
+  await page.locator('#r-source').selectOption({ label: '林小雨' });
+  await page.locator('#r-target').selectOption({ label: '城主' });
+  await page.locator('#r-type').fill('敵對');
+  await page.locator('#r-add').click();
+  await expect(page.locator('.relation-list li')).toHaveCount(1);
+
+  page.once('dialog', (d) => d.dismiss());
+  await page.locator('.relation-list .r-delete').click();
+  await expect(page.locator('.relation-list li')).toHaveCount(1);
+});
+
+test('accepting the delete confirm removes a relation directly from the graph', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '關係圖' }).click();
   await expect(page.locator('#r-source option')).toHaveCount(2);
   await page.locator('#r-source').selectOption({ label: '林小雨' });
@@ -97,6 +111,7 @@ test('deleting a relation directly removes it from the graph', async ({ page }) 
   await expect.poll(() => graphCounts(page), { timeout: 5000 }).toEqual({ nodes: 2, edges: 1 });
   await expect(page.locator('.relation-list li')).toHaveCount(1);
 
+  page.once('dialog', (d) => d.accept());
   await page.locator('.relation-list .r-delete').click();
   await expect(page.locator('.relation-list li')).toHaveCount(0);
   await expect.poll(() => graphCounts(page), { timeout: 5000 }).toEqual({ nodes: 2, edges: 0 });
