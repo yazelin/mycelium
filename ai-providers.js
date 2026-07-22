@@ -27,7 +27,12 @@ export function saveAiConfig(cfg) {
 
 export function taskConfig(task) {
   const cfg = loadAiConfig();
-  return cfg.tasks[task] || cfg.tasks.default || null;
+  const t = cfg.tasks[task];
+  // settings.js's save-all-fieldsets handler writes an entry for every task even
+  // when its fields were left blank, so "present but incomplete" must still fall
+  // through to tasks.default — only a config with both base and model counts as configured.
+  if (t && t.base && t.model) return t;
+  return cfg.tasks.default || null;
 }
 
 export function setTaskConfig(task, providerCfg) {
