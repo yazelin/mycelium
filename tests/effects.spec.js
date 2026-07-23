@@ -371,4 +371,22 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     expect(await page.locator('.mfx-scenery-canvas').count()).toBe(0);
     await ctx.close();
   });
+
+  test('scenery：data-fx-motes=0 時不建粒子 canvas；預設有', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    // demo 的 scenery 開了粒子，應該有一個 canvas
+    await expect(page.locator('.mfx-scenery-canvas')).toHaveCount(1);
+    // 動態插入一個關閉粒子的場景，確認不建 canvas
+    const n = await page.evaluate(() => {
+      var d = document.createElement('div');
+      d.setAttribute('data-fx', 'scenery');
+      d.setAttribute('data-fx-src', 'assets/demo-scene.svg');
+      d.setAttribute('data-fx-motes', '0');
+      d.setAttribute('data-fx-leaves', '0');
+      document.body.appendChild(d);
+      window.MyceliumFX.scenery.start();
+      return document.querySelectorAll('.mfx-scenery-canvas').length;
+    });
+    expect(n).toBe(1); // 只有 demo 原本那一個，新插入的沒建
+  });
 });

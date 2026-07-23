@@ -122,3 +122,18 @@
   z-index: -1;
   pointer-events: none;
 }
+.mfx-scenery-shade {
+  position: fixed;
+  left: 0; right: 0; bottom: 0; height: 44vh;
+  z-index: -1; pointer-events: none;
+  mix-blend-mode: multiply; opacity: 0.35; overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 26%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 26%);
+}
+.mfx-scenery-shade::before {
+  content: ''; position: absolute; top: -40%; left: -60%; width: 80%; height: 180%;
+  background: radial-gradient(ellipse 50% 50% at center, rgba(120,138,120,.5), rgba(120,138,120,0) 70%);
+  animation: mfx-cloudpass 38s linear infinite;
+}
+@keyframes mfx-cloudpass { from { transform: translateX(0); } to { transform: translateX(230vw); } }
+@media (prefers-reduced-motion: reduce) { .mfx-scenery-shade::before { animation: none; } }
