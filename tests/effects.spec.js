@@ -376,17 +376,31 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     await page.goto('/effects/demo.html');
     // demo 的 scenery 開了粒子，應該有一個 canvas
     await expect(page.locator('.mfx-scenery-canvas')).toHaveCount(1);
-    // 動態插入一個關閉粒子的場景，確認不建 canvas
-    const n = await page.evaluate(() => {
+    // 動態插入一個「有錨點」但關閉粒子的場景，確認 mount() 真的走到粒子開關那一行、且不建 canvas
+    const nOff = await page.evaluate(() => {
       var d = document.createElement('div');
       d.setAttribute('data-fx', 'scenery');
       d.setAttribute('data-fx-src', 'assets/demo-scene.svg');
+      d.setAttribute('data-fx-anchor', '#scenery-anchor');
       d.setAttribute('data-fx-motes', '0');
       d.setAttribute('data-fx-leaves', '0');
       document.body.appendChild(d);
       window.MyceliumFX.scenery.start();
       return document.querySelectorAll('.mfx-scenery-canvas').length;
     });
-    expect(n).toBe(1); // 只有 demo 原本那一個，新插入的沒建
+    expect(nOff).toBe(1); // 只有 demo 原本那一個，新插入的（有錨點但粒子數為 0）沒建
+
+    // 再插入一個「有錨點」且開粒子的場景，確認會多建一個 canvas
+    const nOn = await page.evaluate(() => {
+      var d = document.createElement('div');
+      d.setAttribute('data-fx', 'scenery');
+      d.setAttribute('data-fx-src', 'assets/demo-scene.svg');
+      d.setAttribute('data-fx-anchor', '#scenery-anchor');
+      d.setAttribute('data-fx-motes', '20');
+      document.body.appendChild(d);
+      window.MyceliumFX.scenery.start();
+      return document.querySelectorAll('.mfx-scenery-canvas').length;
+    });
+    expect(nOn).toBe(2); // demo 原本那一個 + 新插入且開粒子的這一個
   });
 });
