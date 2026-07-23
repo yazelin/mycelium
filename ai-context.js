@@ -1,13 +1,11 @@
 'use strict';
 import { getAllRecords } from './db.js';
 
-export async function buildContext(projectId) {
-  const [entities, relations, foreshadow, chapters] = await Promise.all([
-    getAllRecords(projectId, 'entities'),
-    getAllRecords(projectId, 'relations'),
-    getAllRecords(projectId, 'foreshadow'),
-    getAllRecords(projectId, 'chapters'),
-  ]);
+// Pure formatter, split out of buildContext so the local-agent skill
+// (skills/mycelium — it reads data/*.json out of the work's GitHub repo instead
+// of IndexedDB) hands its model the exact same context block the in-app AI
+// sees. Any change to what the model is told happens here, once.
+export function formatContext({ entities = [], relations = [], foreshadow = [], chapters = [] }) {
   const entityById = Object.fromEntries(entities.map((e) => [e.id, e]));
 
   // Skip relations whose source or target entity no longer exists, matching
@@ -16,7 +14,11 @@ export async function buildContext(projectId) {
   // them from being sent to the AI model as noise.
   const validRelations = relations.filter((r) => entityById[r.sourceId] && entityById[r.targetId]);
 
+  // .slice() first: this used to sort the caller's own array in place, which
+  // was harmless while the caller was always a fresh getAll() result but is a
+  // trap now that the skill passes in data it keeps using afterwards.
   const recentChapters = chapters
+    .slice()
     .sort((a, b) => (a.volume - b.volume) || (a.order - b.order))
     .slice(-10);
 
@@ -30,4 +32,14 @@ export async function buildContext(projectId) {
     '【最近章節摘要】',
     ...recentChapters.map((c) => `- 第${c.volume}卷・${c.title}：${c.summary || ''}`),
   ].join('\n');
+}
+
+export async function buildContext(projectId) {
+  const [entities, relations, foreshadow, chapters] = await Promise.all([
+    getAllRecords(projectId, 'entities'),
+    getAllRecords(projectId, 'relations'),
+    getAllRecords(projectId, 'foreshadow'),
+    getAllRecords(projectId, 'chapters'),
+  ]);
+  return formatContext({ entities, relations, foreshadow, chapters });
 }

@@ -2,13 +2,7 @@
 import { chat } from './ai-providers.js';
 import { getAllRecords, putRecord } from './db.js';
 import { esc } from './util.js';
-
-const EXTRACT_SYSTEM = `你是小說設定抽取助手。輸入是既有角色名單（含別名）與一段章節全文。
-請找出文中的新角色/地點/勢力、新的人物關係、新的伏筆，並判斷每個名字是「全新角色」還是「既有角色的別名/新稱號」。
-只回傳 JSON，格式：
-{"entities":[{"name":"...","aliasOf":null,"type":"...","notes":"...","reason":"..."}],"relations":[{"source":"...","target":"...","type":"...","reason":"..."}],"foreshadow":[{"title":"...","notes":"...","reason":"..."}]}
-entities 陣列裡，如果判斷是既有角色的別名，aliasOf 填該既有角色的名稱（必須完全符合既有名單裡的 name）；全新角色 aliasOf 填 null。
-只回傳 JSON，不要其他文字。`;
+import { EXTRACT_SYSTEM, buildExtractUserMessage } from './extract-prompt.js';
 
 function parseExtractionJson(text) {
   const match = text.match(/\{[\s\S]*\}/);
@@ -33,12 +27,9 @@ export async function renderExtractPanel(projectId, container) {
     status.textContent = '分析中…';
     try {
       const entities = await getAllRecords(projectId, 'entities');
-      const known = entities
-        .map((e) => `${e.name}${e.aliases && e.aliases.length ? `（別名：${e.aliases.join('、')}）` : ''}`)
-        .join('\n');
       const raw = await chat('extract', [
         { role: 'system', content: EXTRACT_SYSTEM },
-        { role: 'user', content: `既有角色名單：\n${known || '（尚無）'}\n\n章節全文：\n${text}` },
+        { role: 'user', content: buildExtractUserMessage(entities, text) },
       ]);
       const result = parseExtractionJson(raw);
       renderCandidates(projectId, container, entities, result);
