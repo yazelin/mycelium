@@ -5,7 +5,7 @@
   "description": "長篇小說設定管理的 agent skill（角色/關係/大綱/伏筆，對話即介面）＋ 捲動驅動的敘事效果庫",
   "scripts": {
     "test": "playwright test",
-    "test:skill": "node --test 'skills/mycelium/tests/*.test.mjs'",
+    "test:skill": "node --test skills/mycelium/tests/*.test.mjs",
     "serve": "python3 -m http.server 8919"
   },
   "devDependencies": {
