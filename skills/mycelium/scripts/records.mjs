@@ -10,6 +10,37 @@
 export const CHAPTER_STATUSES = ['未寫', '草稿', '完稿'];
 export const FORESHADOW_STATUSES = ['埋設中', '已回收', '棄用'];
 
+/**
+ * 角色的「製作層」欄位：畫師與生圖模型要的是可畫的規格，不是行為描寫。
+ * 表層寫的是「袖子太長、走路會撞到東西」，那是寫小說用的；要畫出來還需要
+ * 身高、髮色、配色。這幾個欄位就是那份規格。
+ *
+ * 一個角色可以有很多份（`visuals` 是陣列）：第一卷的艾可，跟第二卷被清空記憶
+ * 之後的艾可，眼神就不該一樣。所以版本名是第一個欄位，不是可有可無的標籤。
+ */
+// key = 存在資料裡的欄位名；flag = 指令列選項；spec = 傳進 editEntity 的 spec 欄位
+// （視覺備註的 spec 名字不能叫 notes——那是角色本身的設定內文，會撞在一起）。
+export const VISUAL_FIELDS = [
+  { key: 'appearance', flag: 'appearance', spec: 'appearance', label: '外貌', hint: '身高、體型、髮色髮長、眼睛' },
+  { key: 'outfit', flag: 'outfit', spec: 'outfit', label: '服裝', hint: '款式、材質、配件' },
+  { key: 'palette', flag: 'palette', spec: 'palette', label: '配色', hint: '主色、副色、重點色' },
+  { key: 'features', flag: 'features', spec: 'features', label: '特徵', hint: '疤、飾品、慣用手、招牌姿勢' },
+  { key: 'prompt', flag: 'prompt', spec: 'prompt', label: '生成提示詞', hint: '可以直接貼進生圖模型的那一段' },
+  { key: 'notes', flag: 'visual-notes', spec: 'visualNotes', label: '備註', hint: '其他要交代給畫師的事' },
+];
+
+/** 一份空的視覺版本。欄位先立好、內容留空，等要開始畫圖的時候再填。 */
+export function emptyVisual(version) {
+  const v = { version };
+  for (const f of VISUAL_FIELDS) v[f.key] = '';
+  return v;
+}
+
+/** 這一份視覺版本還全空嗎（頁面要把「還沒填」講清楚，而不是留一片空白）。 */
+export function isEmptyVisual(visual) {
+  return VISUAL_FIELDS.every((f) => !String((visual || {})[f.key] || '').trim());
+}
+
 /** 章節排序：先卷、後卷內順序。回傳新陣列，不動傳進來的那個。 */
 export function sortChapters(chapters) {
   return (chapters || []).slice().sort((a, b) => (a.volume - b.volume) || (a.order - b.order));
