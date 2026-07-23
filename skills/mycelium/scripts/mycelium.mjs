@@ -9,8 +9,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { formatContext } from './context.mjs';
 import { buildGraphHtml, buildGraphModel, gitTreeWithRemote } from './graph.mjs';
+import { fetchHistory } from './history.mjs';
+import { MODES, MODE_LABEL, buildReviewModel } from './review.mjs';
+import { buildReviewHtml } from './review-page.mjs';
 import { EXTRACT_SYSTEM, buildExtractUserMessage, formatKnownEntities } from './extract-prompt.mjs';
-import { isForeshadowOverdue as isOverdue, sortChapters } from './records.mjs';
+import { VISUAL_FIELDS, isForeshadowOverdue as isOverdue, sortChapters } from './records.mjs';
 import { applyCandidates, assertValidProjectData, buildProposal, validateCandidates } from './candidates.mjs';
 import {
   RECORD_TYPES, addRecord, describeRecord, diffData, editRecord, isEmptyDiff, planRemoval, removeRecord,
@@ -40,6 +43,10 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
   proposals                   列出 repo 裡現有的提案檔
   graph [--out <檔案.html>]    匯出可離線開的人物關係圖 HTML（點兩下就能看）
                               預設寫到本機快取；不准寫進有 remote 的 git 目錄
+  review [--mode all|author|製作…] [--volume N] [--out <資料夾>] [--history N]
+                              匯出「審閱頁」：全部設定可瀏覽、標出上次以來的新改動、
+                              三種模式（作者／製作／公開）。預設三種都產。
+                              製作與公開的檔案裡**沒有**底層內容，不是藏起來。
 
 抽章節（LLM 由你自己的 agent 跑）：
   extract-prompt --text <章節檔>       印出 system + user 兩段提示詞
@@ -49,6 +56,9 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
   edit entity <名字|id> [--rename ...] [--type ...] [--notes ...]
                         [--add-alias ...] [--rm-alias ...] [--add-tag ...] [--rm-tag ...]
                         [--field 欄位=值] [--rm-field 欄位]
+                        [--visual <版本名> --appearance ... --outfit ... --palette ...
+                         --features ... --prompt ... --visual-notes ...] [--rm-visual <版本名>]
+                        （視覺設定是給畫師與生圖模型看的規格；一個角色可以有很多版）
   edit chapter <標題|id> [--status 未寫|草稿|完稿] [--title ...] [--summary ...]
                          [--wordcount N] [--volume N] [--order N] [--content-file <檔>]
   edit foreshadow <標題|id> [--status 埋設中|已回收|棄用] [--title ...] [--notes ...]
@@ -154,6 +164,23 @@ function readContentFile(opts) {
   if (Array.isArray(path)) die('--content-file 只能給一個檔案。');
   if (!existsSync(path)) die(`找不到正文檔：${path}`);
   return readFileSync(path, 'utf8');
+}
+
+/** review 的模式。中文也收，因為使用者跟 agent 講的是「製作模式」不是 production。 */
+const MODE_ALIAS = {
+  author: 'author', 作者: 'author', production: 'production', 製作: 'production',
+  public: 'public', 公開: 'public',
+};
+function parseModes(raw) {
+  if (raw === undefined || raw === true || raw === 'all' || raw === '全部') return MODES.slice();
+  const list = (Array.isArray(raw) ? raw : String(raw).split(',')).map((s) => String(s).trim()).filter(Boolean);
+  const out = [];
+  for (const m of list) {
+    const norm = MODE_ALIAS[m];
+    if (!norm) die(`--mode 只收 ${Object.keys(MODE_ALIAS).join(' / ')} 或 all，收到「${m}」。`);
+    if (!out.includes(norm)) out.push(norm);
+  }
+  return out.length ? out : MODES.slice();
 }
 
 function requireType(raw) {
@@ -337,6 +364,71 @@ const commands = {
     console.log('點兩下就能開，不需要網路，也不需要跑伺服器。');
   },
 
+  /**
+   * 審閱頁（#38）。graph 回答的是「誰跟誰糾纏」，review 回答的是另外三個問題：
+   *
+   *   1. 全部東西在哪裡（沒有關係的角色在關係圖上根本不存在）
+   *   2. 上次看完之後，AI 又動了什麼（從 git 歷史算，每一次寫入都是一個 commit）
+   *   3. 這一份可以給誰看（作者／畫師／讀者，看到的東西不一樣）
+   *
+   * 三種模式各產一個檔案，不是同一個檔案切換顯示——製作與公開模式的底層內容
+   * 必須連 DOM 都沒有，否則看一次原始碼就破功。過濾在這裡（產生的時候）做完。
+   */
+  async review(opts) {
+    const { repo, data } = loadData(opts);
+    if (!(data.entities || []).length) die('設定庫裡還沒有任何東西，沒有可以審閱的內容。');
+
+    const modes = parseModes(opts.mode);
+    const volume = opts.volume === undefined ? 1 : Number(opts.volume);
+    if (!Number.isFinite(volume) || volume < 1) die(`--volume 要是 1 以上的數字，收到「${opts.volume}」。`);
+
+    const outOpt = opts.out;
+    if (outOpt === true) die('--out 要給資料夾路徑。');
+    if (Array.isArray(outOpt)) die('--out 只能給一個路徑。');
+    const outDir = outOpt ? resolve(String(outOpt)) : join(cacheDir(repo), 'review');
+    mkdirSync(outDir, { recursive: true });
+    const tracked = opts.force ? null : gitTreeWithRemote(outDir);
+    if (tracked) {
+      die(`${outDir}\n     在一個有 remote 的 git 工作目錄裡（${tracked}）。\n`
+        + '     審閱頁帶著整部作品的設定、伏筆與底層，推上去就是公開。\n'
+        + '     真的要寫在這裡就加 --force，並自己確認它有被 .gitignore 蓋到。');
+    }
+
+    let history = null;
+    if (modes.includes('author') && !opts['no-history']) {
+      const limit = opts.history === undefined ? 40 : Number(opts.history);
+      if (!Number.isFinite(limit) || limit < 1) die(`--history 要是 1 以上的數字，收到「${opts.history}」。`);
+      try {
+        history = await fetchHistory(repo, { limit });
+      } catch (e) {
+        // 讀不到歷史不該讓整個指令失敗：少了新舊標記，頁面其他部分照樣有用。
+        console.log(`（讀不到 git 歷史，這次沒有新舊標記：${e.message}）`);
+      }
+    }
+
+    const generatedAt = new Date().toLocaleString('zh-TW', { hour12: false });
+    const fileOf = (m) => `${repo.name}.${m === 'public' ? `public-v${volume}` : m}.review.html`;
+    const siblings = Object.fromEntries(modes.map((m) => [m, fileOf(m)]));
+
+    for (const mode of modes) {
+      const model = buildReviewModel(data, {
+        mode, volume, history, title: repo.name, generatedAt, repoSlug: repo.slug,
+      });
+      const out = join(outDir, fileOf(mode));
+      writeFileSync(out, buildReviewHtml({ model, siblings }), 'utf8');
+      const n = `角色 ${model.entities.length}、關係 ${model.relations.length}、章節 ${model.chapters.length}、伏筆 ${model.foreshadow.length}`;
+      console.log(`${MODE_LABEL[mode]}模式：${n}`);
+      if (mode !== 'author') {
+        console.log(`  已在產生時移除：底層段落 ${model.dropped.sections} 段、伏筆 ${model.dropped.foreshadow} 筆`
+          + (model.dropped.entities ? `、未登場角色 ${model.dropped.entities} 個` : ''));
+      } else if (history) {
+        console.log(`  讀了最近 ${history.scanned} 次寫入，標出 ${Object.keys(history.changes).length} 筆有動過的紀錄。`);
+      }
+      console.log(`  ${out}`);
+    }
+    console.log('\n點兩下就能開，不需要網路，也不需要跑伺服器。頁面上方可以互相切換模式。');
+  },
+
   proposals(opts) {
     const repo = resolveRepo(opts);
     const raw = ghGetRaw(repo, 'proposals');
@@ -418,7 +510,13 @@ const commands = {
     if (!ref) die(`要指定改哪一筆，例如：edit ${type} 林小雨 --notes "…"`);
     const content = readContentFile(opts);
     const maps = {
-      entity: { rename: 'rename', type: 'type', notes: 'notes', 'add-alias': 'addAlias', 'rm-alias': 'rmAlias', 'add-tag': 'addTag', 'rm-tag': 'rmTag', field: 'field', 'rm-field': 'rmField' },
+      entity: {
+        rename: 'rename', type: 'type', notes: 'notes', 'add-alias': 'addAlias', 'rm-alias': 'rmAlias',
+        'add-tag': 'addTag', 'rm-tag': 'rmTag', field: 'field', 'rm-field': 'rmField',
+        // 製作層：視覺版本（同一個角色可以有很多版）
+        visual: 'visual', 'rm-visual': 'rmVisual',
+        ...Object.fromEntries(VISUAL_FIELDS.map((f) => [f.flag, f.spec])),
+      },
       chapter: { status: 'status', title: 'title', summary: 'summary', wordcount: 'wordCount', volume: 'volume', order: 'order' },
       foreshadow: { status: 'status', title: 'title', notes: 'notes', plant: 'plant', recover: 'recover', 'link-entity': 'linkEntity', 'unlink-entity': 'unlinkEntity', 'link-relation': 'linkRelation', 'unlink-relation': 'unlinkRelation' },
       relation: { type: 'type', notes: 'notes' },
@@ -557,7 +655,7 @@ const commands = {
   },
 };
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') { console.log(USAGE); return; }
@@ -565,7 +663,9 @@ function main() {
   if (!fn) die(`沒有這個指令：${cmd}\n${USAGE}`);
   const opts = parseArgs(argv.slice(1));
   try {
-    fn(opts);
+    // 大部分指令是同步的，review 要並行抓 git 歷史所以是 async——
+    // await 一個非 Promise 也沒事，這裡不需要分兩條路。
+    await fn(opts);
   } catch (e) {
     die(e.message);
   }

@@ -13,7 +13,7 @@
 // 3. 章節排序、伏筆逾期、狀態列舉一律從 records.mjs 拿。
 import { PROJECT_STORES } from './schema.mjs';
 import {
-  CHAPTER_STATUSES, FORESHADOW_STATUSES,
+  CHAPTER_STATUSES, FORESHADOW_STATUSES, VISUAL_FIELDS, emptyVisual,
   foreshadowReferencingChapter, foreshadowReferencingEntity, foreshadowReferencingRelation,
   relationsAffectedByEntityDelete,
 } from './records.mjs';
@@ -154,6 +154,44 @@ function parseFieldPair(raw) {
   return { key, value: s.slice(idx + 1).trim() };
 }
 
+/**
+ * 角色的視覺版本（`visuals`）。畫師與生圖模型要的是可畫的規格，而且同一個角色
+ * 在不同時期長得不一樣——第一卷的艾可，跟第二卷被清空記憶之後的艾可。
+ *
+ * 所以版本是陣列不是單一組欄位，而且**指定版本名是必要的**：不講清楚在改哪一版，
+ * 就等於預設只有一版，那正是這裡要避免的事。
+ */
+function applyVisualSpec(updated, spec, log) {
+  const version = isDefined(spec.visual) ? String(spec.visual).trim() : null;
+  const visuals = (updated.visuals || []).map((v) => ({ ...v }));
+
+  for (const raw of asList(spec.rmVisual)) {
+    const i = visuals.findIndex((v) => v.version === raw);
+    if (i === -1) throw new Error(`「${updated.name}」沒有視覺版本「${raw}」，未變更任何資料。`);
+    visuals.splice(i, 1);
+    log.push(`移除視覺版本「${raw}」。`);
+  }
+
+  const wanted = VISUAL_FIELDS.filter((f) => isDefined(spec[f.spec]));
+  if (wanted.length && !version) {
+    throw new Error('要改視覺設定得先講哪一版，例如 --visual 第一卷（同一個角色可以有很多版），未變更任何資料。');
+  }
+  if (version) {
+    let hit = visuals.find((v) => v.version === version);
+    if (!hit) {
+      hit = emptyVisual(version);
+      visuals.push(hit);
+      log.push(`新增視覺版本「${version}」（欄位先立好，內容可以之後再填）。`);
+    }
+    for (const f of wanted) {
+      hit[f.key] = String(spec[f.spec]);
+      log.push(`視覺版本「${version}」的${f.label}已更新。`);
+    }
+  }
+
+  if (visuals.length || (updated.visuals || []).length) updated.visuals = visuals;
+}
+
 export function editEntity(data, ref, spec = {}) {
   const next = cloneData(data);
   const existing = findEntity(next, ref);
@@ -210,6 +248,8 @@ export function editEntity(data, ref, spec = {}) {
     log.push(`移除自訂欄位「${key}」。`);
   }
   if (fields.length || (updated.customFields || []).length) updated.customFields = fields;
+
+  applyVisualSpec(updated, spec, log);
 
   if (!log.length) throw new Error('沒有指定任何要改的欄位，未變更任何資料。');
   replaceIn(next.entities, updated);
