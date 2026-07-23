@@ -7,17 +7,16 @@
 // 三條不可以違反的規則：
 //
 // 1. **編輯一定保留 id**（走 `{ ...existing, 欄位 }`）。改 id 等於刪掉再重建：
-//    伏筆指向的章節會變成孤兒、指向角色的關係會被連帶刪掉。網頁那邊為了這件事
-//    修過一輪（見 entities.js / chapters.js 的註解），skill 不可以走回頭路。
-// 2. **刪除 entity 的連帶行為跟網頁同一個函式**（records.js 的
+//    伏筆指向的章節會變成孤兒、指向角色的關係會被連帶刪掉。
+// 2. **刪除 entity 一定連帶刪掉它的關係**（records.mjs 的
 //    relationsAffectedByEntityDelete），不各做各的。
-// 3. 章節排序、伏筆逾期、狀態列舉一律從 records.js 拿。
-import { PROJECT_STORES } from '../../../db.js';
+// 3. 章節排序、伏筆逾期、狀態列舉一律從 records.mjs 拿。
+import { PROJECT_STORES } from './schema.mjs';
 import {
   CHAPTER_STATUSES, FORESHADOW_STATUSES,
   foreshadowReferencingChapter, foreshadowReferencingEntity, foreshadowReferencingRelation,
   relationsAffectedByEntityDelete,
-} from '../../../records.js';
+} from './records.mjs';
 import { assertValidProjectData, newId } from './candidates.mjs';
 
 export const RECORD_TYPES = ['entity', 'chapter', 'foreshadow', 'relation'];
@@ -388,7 +387,7 @@ export function addChapter(data, spec = {}) {
   const created = {
     id: newId('c'),
     volume,
-    // 跟網頁新增表單同一條：order 用目前章節總數，之後可以再用 edit --order 調。
+    // order 用目前章節總數（接在最後），之後可以再用 edit --order 調。
     order: isDefined(spec.order) ? Number(spec.order) : next.chapters.length,
     title,
     status,
@@ -458,11 +457,11 @@ export function planRemoval(data, type, ref) {
   const cascade = [];
   const warn = [];
   if (type === 'entity') {
-    // 跟網頁 entities.js 同一個函式：關係一定要連帶刪，否則關係圖會整張畫不出來。
+    // 關係一定要連帶刪，否則關係圖會整張畫不出來。
     const relations = relationsAffectedByEntityDelete(data.relations, record.id);
     if (relations.length) cascade.push({ store: 'relations', records: relations });
     const fs = foreshadowReferencingEntity(data.foreshadow, record.id);
-    if (fs.length) warn.push(`另有 ${fs.length} 筆伏筆關聯到它（${fs.map((f) => f.title).join('、')}）；跟網頁一致，這些關聯不會自動清掉，之後會顯示成「（已刪除）」。`);
+    if (fs.length) warn.push(`另有 ${fs.length} 筆伏筆關聯到它（${fs.map((f) => f.title).join('、')}）；這些關聯不會自動清掉，之後會顯示成「（已刪除）」。`);
   }
   if (type === 'chapter') {
     if (record.content && record.content.trim()) warn.push(`這一章有 ${record.content.length} 字正文，會一起消失，無法復原（只能靠快照）。`);

@@ -2,7 +2,7 @@
   "name": "mycelium",
   "private": true,
   "type": "module",
-  "description": "多作品小說/IP 創作輔助工具（世界觀設定、人物關係圖、大綱、伏筆追蹤、AI 輔助）",
+  "description": "長篇小說設定管理的 agent skill（角色/關係/大綱/伏筆，對話即介面）＋ 捲動驅動的敘事效果庫",
   "scripts": {
     "test": "playwright test",
     "test:skill": "node --test 'skills/mycelium/tests/*.test.mjs'",

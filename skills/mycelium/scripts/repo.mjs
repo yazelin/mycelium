@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { PROJECT_STORES } from '../../../db.js';
+import { PROJECT_STORES } from './schema.mjs';
 
 export const CONFIG_PATH = join(homedir(), '.config', 'mycelium', 'works.json');
 
@@ -102,8 +102,8 @@ export function cacheDir(repo) {
 
 /**
  * 讀作品 repo 的 data/*.json。全部五個都 404 代表 repo 打錯或還沒同步過，
- * 這時候要報錯而不是回傳五個空陣列——跟 app 的 importFromGithub 同一個判斷，
- * 那個誤判曾經整份洗掉專案。
+ * 這時候要報錯而不是回傳五個空陣列：把「抓不到」當成「是空的」，
+ * 接下來任何一次寫入都會整份洗掉專案。
  */
 export function pullData(repo) {
   const data = {};
@@ -127,7 +127,7 @@ export function pullData(repo) {
     found++;
   }
   if (found === 0) {
-    throw new Error(`在 ${repo.slug} 找不到任何 data/*.json——確認 repo 名稱，或先在網頁按一次「同步到 GitHub」。`);
+    throw new Error(`在 ${repo.slug} 找不到任何 data/*.json——確認 repo 名稱，以及 data/ 底下是不是真的有東西。`);
   }
   const dir = join(cacheDir(repo), 'data');
   mkdirSync(dir, { recursive: true });

@@ -1,21 +1,19 @@
 'use strict';
 // 候選（candidate）格式的驗證與套用。
 //
-// 這裡的格式就是 app 的 extract.js 從 AI 拿到的那一份，沒有第二套契約：
+// 格式就是 LLM 抽章節之後回傳的那一份，沒有第二套契約：
 //   {"entities":[{name, aliasOf, type, notes, reason}],
 //    "relations":[{source, target, type, reason}],
 //    "foreshadow":[{title, notes, reason}]}
 //
 // 提案檔（proposals/<timestamp>.json）就是這三個陣列放在最上層，另外附上
-// version / generatedAt / source / note 幾個 metadata 欄位——這樣 app 端只要讀
-// result.entities / result.relations / result.foreshadow，跟它處理 AI 回傳的
-// 物件完全一樣。
-import { PROJECT_STORES } from '../../../db.js';
-import { isPlainRecord, isValidProjectData } from '../../../backup.js';
+// version / generatedAt / source / note 幾個 metadata 欄位——讀的人（或程式）
+// 只要看 entities / relations / foreshadow，跟 LLM 直接回傳的物件完全一樣。
+import { PROJECT_STORES, isPlainRecord, isValidProjectData } from './schema.mjs';
 
 export const PROPOSAL_VERSION = 1;
 
-// 跟 db.js 的 newId 同一套規則（前綴 + 時間 + 亂數），只是那支沒有 export。
+// 前綴 + 時間 + 亂數，跟舊網頁產 id 的規則同一套。
 let idCounter = 0;
 export function newId(prefix) {
   idCounter += 1;
@@ -85,7 +83,7 @@ export function buildProposal(candidates, meta = {}) {
 /**
  * 直接寫入時，把候選套進一份完整的 data（五個 store 的陣列）。
  *
- * 兩趟（two-pass）的順序刻意跟 extract.js 一模一樣：AI 回的是一個沒有順序保證
+ * 兩趟（two-pass）：AI 回的是一個沒有順序保證
  * 的扁平陣列，同一批裡「黑袍人」可能排在揭露它就是「城主」之前，所以第一趟先
  * 把所有全新角色建出來，第二趟才處理別名合併，別名查表永遠看得到完整名單。
  * aliasOf 指向根本不存在的名字時，跟 app 一樣退回「當成獨立新角色建立」，
@@ -114,7 +112,7 @@ export function applyCandidates(data, candidates, options = {}) {
     const existing = nameToEntity[cand.name];
     if (existing) {
       // 預設略過（不重複建立）。使用者明講要用候選補既有角色的設定時，走
-      // `--update-existing`：跟網頁就地編輯同一條 `{ ...existing, 欄位 }` 路徑，
+      // `--update-existing`：走就地編輯的 `{ ...existing, 欄位 }` 路徑，
       // **保留 id**，所以既有的關係與伏筆連結都不會斷。
       if (options.updateExisting && (isNonEmptyString(cand.notes) || isNonEmptyString(cand.type))) {
         const changed = [];
@@ -218,8 +216,8 @@ export function applyCandidates(data, candidates, options = {}) {
 }
 
 /**
- * 用 app 匯入時的同一組規則檢查整份 data——app 的匯入器會擋掉壞掉的檔案，
- * 這裡先擋一次，確保 skill 產出的東西永遠不會讓 app 噎到。
+ * 寫回去之前的最後一道關：整份 data 必須是「五個 store 都在、每筆都是普通物件」。
+ * 壞掉的東西寧可在這裡爆，也不要進到 repo 的 data/*.json。
  */
 export function assertValidProjectData(data) {
   if (!isValidProjectData(data)) {

@@ -1,6 +1,6 @@
 'use strict';
 // 跑法：node --test skills/mycelium/tests/
-// 這組測試跟網頁的 Playwright 測試完全分開，不需要瀏覽器。
+// 純 node 測試，不需要瀏覽器、不連網。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyCandidates, assertValidProjectData, buildProposal, validateCandidates } from '../scripts/candidates.mjs';
@@ -59,7 +59,7 @@ test('找不到角色的關係候選被略過，不會產生斷掉的 relation',
   assert.ok(log.some((l) => l.includes('略過關係')));
 });
 
-test('伏筆候選帶入 app 的預設欄位', () => {
+test('伏筆候選帶入預設欄位', () => {
   const { data: next } = applyCandidates(withCast(), {
     foreshadow: [{ title: '林小雨的真實身份', notes: '暗示她是城主早年的徒弟', reason: '城主的台詞埋了伏筆' }],
   });
