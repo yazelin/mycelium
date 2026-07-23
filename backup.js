@@ -27,7 +27,7 @@ function hasValidIdIfPresent(rec) {
   return (typeof id === 'string') || (typeof id === 'number');
 }
 
-function isPlainRecord(rec) {
+export function isPlainRecord(rec) {
   return rec !== null && typeof rec === 'object' && !Array.isArray(rec) && hasValidIdIfPresent(rec);
 }
 
