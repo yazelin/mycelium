@@ -16,6 +16,9 @@
  *   3. 關掉 JS 也要能讀完整篇：所有效果都是這支腳本加上去的。
  *   4. scramble 的 DOM 一定是原文，亂序只做視覺位移。
  *   5. freeze 是「上膛→擊發」：進入視窗只上膛，下一次捲動輸入才擊發。
+ *   6. 任何需要讀者主動輸入才會前進的效果，都必須同時有「提示」與
+ *      「自動前進的保險」——目前只有 eyelid 屬於這類（見 #37）。
+ *      加新效果時如果它也需要讀者動作才繼續，這條規則一樣適用。
  *
  * MIT © 林亞澤
  */
@@ -51,7 +54,11 @@
     // 睜眼：一條縫（vh）→ 捲動 openVh 後全開。
     eyelidSlitVh: 10,
     eyelidOpenVh: 70,
-    eyelidFailsafeMs: 9000, // 保險：不管有沒有捲，時間到就全開
+    // 讀者不動的話：先給提示，再自己緩緩展開（#37）。
+    // 任何一次捲動輸入都會立刻接管、蓋掉這整段時間軸。
+    eyelidHintDelayMs: 2500,      // 縫下方浮出向下 chevron 的延遲
+    eyelidAutoOpenDelayMs: 7000,  // 開始自動展開的延遲
+    eyelidAutoOpenDurationMs: 3200, // 自動展開本身要跑多久（呼吸速度，非瞬開）
 
     // 亂序：被交換位置的相鄰字對比例。
     scrambleLevel: 0.25,
@@ -255,6 +262,21 @@
   // =====================================================================
   // 全黑中一條縫，捲動後逐漸展開。進度由捲動位置決定，
   // 所以鍵盤捲動一樣打得開（不攔截任何輸入）。
+  //
+  // 讀者完全不動的話（#37）：先浮出提示，再自己緩緩展開——
+  // 睜眼本來就是自己會發生的事，不需要誰同意。自動展開的結果
+  // 跟手動捲開必須是同一個終點，沒有「你錯過了」這件事。
+  // 任何一次真的捲動（scrollY 改變）都立刻接管，提示淡出。
+  var eyelidRaf = 0;
+  function startEyelidLoop() {
+    if (!eyelidRaf) eyelidRaf = requestAnimationFrame(eyelidRafTick);
+  }
+  function eyelidRafTick() {
+    eyelidRaf = 0;
+    if (!active()) return;
+    eyelidTick();
+  }
+
   function eyelidSetup(el) {
     var s = stateOf(el);
     if (s.fired || s.lid) return;
@@ -266,24 +288,75 @@
     document.body.appendChild(lid);
     s.lid = lid;
     s.startY = global.scrollY || global.pageYOffset || 0;
-    s.deadline = Date.now() + config.eyelidFailsafeMs;
+    s.userTook = false;
+    var now = Date.now();
+    s.hintAt = now + num(el, 'data-fx-hint-ms', config.eyelidHintDelayMs, 0);
+    s.autoOpenAt = now + num(el, 'data-fx-auto-ms', config.eyelidAutoOpenDelayMs, 0);
+    s.autoOpenDuration = num(el, 'data-fx-auto-duration-ms', config.eyelidAutoOpenDurationMs, 100);
+
+    var hint = document.createElement('div');
+    hint.className = 'mfx-eyelid-hint';
+    hint.setAttribute('aria-hidden', 'true');
+    hint.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<polyline points="5 9 12 16 19 9"></polyline></svg>';
+    document.body.appendChild(hint);
+    s.hint = hint;
+
     eyelidPaint(el);
+    startEyelidLoop();
+  }
+
+  // 呼吸感的緩開曲線：慢入、慢出，中段快一點，不是瞬開也不是等速。
+  function eyelidEase(t) { return t * t * (3 - 2 * t); }
+
+  function eyelidFinish(s, el) {
+    s.lid.remove(); s.lid = null;
+    if (s.hint) { s.hint.remove(); s.hint = null; }
+    s.fired = true;
+    el.setAttribute('data-fx-state', 'done');
   }
 
   function eyelidPaint(el) {
     var s = states.get(el);
     if (!s || !s.lid) return;
+    var now = Date.now();
     var y = global.scrollY || global.pageYOffset || 0;
+    if (!s.userTook && y !== s.startY) s.userTook = true; // 讀者一動就接管
+
     var openPx = num(el, 'data-fx-open', config.eyelidOpenVh, 10, 300) * vh() / 100;
-    var p = Math.max(0, Math.min(1, (y - s.startY) / openPx));
-    if (Date.now() > s.deadline) p = 1;
+    var p, state;
+    if (s.userTook) {
+      p = Math.max(0, Math.min(1, (y - s.startY) / openPx));
+      state = 'user-open';
+    } else if (now >= s.autoOpenAt) {
+      var t = Math.min(1, (now - s.autoOpenAt) / s.autoOpenDuration);
+      p = eyelidEase(t);
+      state = 'auto-open';
+    } else if (now >= s.hintAt) {
+      p = 0;
+      state = 'hint';
+    } else {
+      p = 0;
+      state = 'waiting';
+    }
+
     var h = vh();
     var slit = num(el, 'data-fx-slit', config.eyelidSlitVh, 0, 100) * h / 100;
     var open = slit + (h - slit) * p;
     var bar = Math.max(0, (h - open) / 2);
     s.lid.firstChild.style.height = bar + 'px';
     s.lid.lastChild.style.height = bar + 'px';
-    if (p >= 1) { s.lid.remove(); s.lid = null; s.fired = true; }
+    el.setAttribute('data-fx-state', state);
+
+    if (s.hint) {
+      // 提示只在「等待→提示」這一段顯示；一旦開始自動展開或讀者接管，立刻淡出。
+      s.hint.classList.toggle('mfx-eyelid-hint--visible', state === 'hint');
+      s.hint.style.top = (h / 2 + slit / 2 + 14) + 'px';
+    }
+
+    if (p >= 1) { eyelidFinish(s, el); return; }
+    if (!s.userTook) startEyelidLoop(); // 還沒被接管：時間仍在跑，繼續看下一幀
   }
 
   function eyelidTick() {
@@ -518,9 +591,11 @@
     armed.length = 0;
     frozenUntil = 0;
     dragActive = null;
+    if (eyelidRaf) { cancelAnimationFrame(eyelidRaf); eyelidRaf = 0; }
     states.forEach(function (s, el) {
       if (s.ghost) unmountGhost(el);
       if (s.lid) { s.lid.remove(); s.lid = null; }
+      if (s.hint) { s.hint.remove(); s.hint = null; }
       if (s.spans) clearScramble(el);
       if (s.echoes) clearStutter(el);
       el.removeAttribute('data-fx-state');
@@ -564,6 +639,7 @@
     if (s) {
       if (s.ghost) unmountGhost(el);
       if (s.lid) { s.lid.remove(); s.lid = null; }
+      if (s.hint) { s.hint.remove(); s.hint = null; }
       if (s.spans) clearScramble(el);
       if (s.echoes) clearStutter(el);
       states.delete(el);
