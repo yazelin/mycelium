@@ -19,6 +19,8 @@
  *   6. 任何需要讀者主動輸入才會前進的效果，都必須同時有「提示」與
  *      「自動前進的保險」——目前只有 eyelid 屬於這類（見 #37）。
  *      加新效果時如果它也需要讀者動作才繼續，這條規則一樣適用。
+ *   7. eyelid 開眼期間，頁面不能跟著捲動：捲動輸入只准推進開合度，
+ *      不准移動 scrollY，否則睜眼前的文字會被捲到看不見（見 #40）。
  *
  * MIT © 林亞澤
  */
@@ -260,13 +262,17 @@
   // =====================================================================
   // eyelid 睜眼
   // =====================================================================
-  // 全黑中一條縫，捲動後逐漸展開。進度由捲動位置決定，
-  // 所以鍵盤捲動一樣打得開（不攔截任何輸入）。
+  // 全黑中一條縫，捲動後逐漸展開。開合度由 wheel / touchmove 的 delta
+  // 直接累加而來，不是讀 scrollY——眼睛睜開的時候視野不能跟著跑，
+  // 所以 wheel / touchmove 在開眼期間會被吃掉（preventDefault，跟 freeze
+  // 一樣的手法），delta 拿去推進開合度而不是推頁面（見 #40）。
+  //
+  // 鍵盤捲動與捲軸拖曳一樣不攔截（無障礙逃生出口）——但這兩種輸入
+  // 一旦真的移動了 scrollY，就視為讀者主動「跳過開場動畫」，直接全開。
   //
   // 讀者完全不動的話（#37）：先浮出提示，再自己緩緩展開——
   // 睜眼本來就是自己會發生的事，不需要誰同意。自動展開的結果
-  // 跟手動捲開必須是同一個終點，沒有「你錯過了」這件事。
-  // 任何一次真的捲動（scrollY 改變）都立刻接管，提示淡出。
+  // 跟手動捲開必須是同一個終點，沒有「你錯過了」這件事（而且都不捲頁面）。
   var eyelidRaf = 0;
   function startEyelidLoop() {
     if (!eyelidRaf) eyelidRaf = requestAnimationFrame(eyelidRafTick);
@@ -289,6 +295,7 @@
     s.lid = lid;
     s.startY = global.scrollY || global.pageYOffset || 0;
     s.userTook = false;
+    s.p = 0; // 開合度：只由 eyelidAdvance / eyelidSkipToOpen 推進，不讀 scrollY
     var now = Date.now();
     s.hintAt = now + num(el, 'data-fx-hint-ms', config.eyelidHintDelayMs, 0);
     s.autoOpenAt = now + num(el, 'data-fx-auto-ms', config.eyelidAutoOpenDelayMs, 0);
@@ -317,17 +324,41 @@
     el.setAttribute('data-fx-state', 'done');
   }
 
+  // 讀者主動輸入（wheel / touchmove）：delta 換算成開合度，絕不碰
+  // scrollY——這是 #40 的修復核心，眼睛開的時候視野不能動。
+  function eyelidAdvance(el, s, deltaPx) {
+    var openPx = num(el, 'data-fx-open', config.eyelidOpenVh, 10, 300) * vh() / 100;
+    s.userTook = true;
+    s.p = Math.max(0, Math.min(1, (typeof s.p === 'number' ? s.p : 0) + deltaPx / openPx));
+    schedule();
+  }
+
+  // 鍵盤 / 捲軸拖曳絕不攔截，但它們一旦真的移動了 scrollY，
+  // 就代表讀者選擇跳過開場動畫——直接全開，不追著頁面跑。
+  function eyelidSkipToOpen(s) {
+    s.userTook = true;
+    s.p = 1;
+  }
+
+  // 目前螢幕上「還沒開完」的 eyelid（供 wheel / touchmove / scroll 事件查詢）。
+  function activeEyelid() {
+    var list = document.querySelectorAll('[data-fx="eyelid"]');
+    for (var i = 0; i < list.length; i++) {
+      var s = states.get(list[i]);
+      if (s && s.lid && !s.fired) return { el: list[i], s: s };
+    }
+    return null;
+  }
+
   function eyelidPaint(el) {
     var s = states.get(el);
     if (!s || !s.lid) return;
     var now = Date.now();
-    var y = global.scrollY || global.pageYOffset || 0;
-    if (!s.userTook && y !== s.startY) s.userTook = true; // 讀者一動就接管
 
-    var openPx = num(el, 'data-fx-open', config.eyelidOpenVh, 10, 300) * vh() / 100;
     var p, state;
     if (s.userTook) {
-      p = Math.max(0, Math.min(1, (y - s.startY) / openPx));
+      // 開合度已經由 eyelidAdvance / eyelidSkipToOpen 算好了，這裡只讀不算。
+      p = s.p;
       state = 'user-open';
     } else if (now >= s.autoOpenAt) {
       var t = Math.min(1, (now - s.autoOpenAt) / s.autoOpenDuration);
@@ -522,14 +553,31 @@
   }
 
   // scroll / keydown 都只是「觀察」，永遠不 preventDefault：
-  // 鍵盤捲動與捲軸拖曳是逃生出口，也是無障礙必要。
-  function onScroll() { hasScrolled = true; schedule(); }
+  // 鍵盤捲動與捲軸拖曳是逃生出口，也是無障礙必要。但如果這種
+  // 「不受控」的捲動剛好發生在 eyelid 還沒開完的時候，代表讀者
+  // 用逃生出口跳過了開場動畫——直接讓它全開，不追著頁面跑（#40）。
+  function onScroll() {
+    hasScrolled = true;
+    var eye = activeEyelid();
+    if (eye) {
+      var y = global.scrollY || global.pageYOffset || 0;
+      if (y !== eye.s.startY) eyelidSkipToOpen(eye.s);
+    }
+    schedule();
+  }
 
   function onWheel(e) {
     if (!active()) return;
     hasScrolled = true;
     if (Date.now() < frozenUntil) { e.preventDefault(); return; }
     if (tryFire(false)) { e.preventDefault(); return; }
+    var eye = activeEyelid();
+    if (eye) {
+      // 開眼期間：吃掉這次捲動輸入，delta 拿去推開合度，頁面不動（#40）。
+      e.preventDefault();
+      eyelidAdvance(eye.el, eye.s, wheelPixels(e));
+      return;
+    }
     if (dragActive && e.deltaY) {
       e.preventDefault();
       global.scrollBy(0, wheelPixels(e) / dragFactor(dragActive, false));
@@ -553,9 +601,17 @@
     hasScrolled = true;
     if (Date.now() < frozenUntil) { e.preventDefault(); return; }
     if (tryFire(true)) { e.preventDefault(); return; }
-    if (!dragActive) return;
     var y = e.touches[0].clientY;
     var dy = touchY - y;
+    var eye = activeEyelid();
+    if (eye) {
+      // 開眼期間：吃掉這次觸控捲動，delta 拿去推開合度，頁面不動（#40）。
+      touchY = y;
+      e.preventDefault();
+      eyelidAdvance(eye.el, eye.s, dy);
+      return;
+    }
+    if (!dragActive) return;
     touchY = y;
     e.preventDefault();
     touchDragging = true;
