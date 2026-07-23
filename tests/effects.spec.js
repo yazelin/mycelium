@@ -343,4 +343,158 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     await page.waitForTimeout(300);
     expect(errors).toEqual([]);
   });
+
+  test('scenery：捲過錨點後背景迫升（--rev 從 0 到 rise）', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    const bg = page.locator('.mfx-scenery-bg').first();
+    await expect(bg).toHaveCount(1);
+    const before = await bg.evaluate((el) => getComputedStyle(el).getPropertyValue('--rev').trim());
+    // 捲到錨點以下
+    await page.evaluate(() => {
+      const a = document.querySelector('[data-fx="scenery"]').getAttribute('data-fx-anchor');
+      document.querySelector(a).scrollIntoView({ block: 'start' });
+      window.scrollBy(0, window.innerHeight);
+    });
+    await page.waitForTimeout(300);
+    const after = await bg.evaluate((el) => getComputedStyle(el).getPropertyValue('--rev').trim());
+    expect(parseFloat(before)).toBeLessThan(5);
+    expect(parseFloat(after)).toBeGreaterThan(20);
+  });
+
+  test('scenery：prefers-reduced-motion 時直接完全露出、無粒子 canvas', async ({ browser }) => {
+    const ctx = await browser.newContext({ reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    await page.goto('/effects/demo.html');
+    const rev = await page.locator('.mfx-scenery-bg').first()
+      .evaluate((el) => getComputedStyle(el).getPropertyValue('--rev').trim());
+    expect(parseFloat(rev)).toBeGreaterThan(90);
+    expect(await page.locator('.mfx-scenery-canvas').count()).toBe(0);
+    await ctx.close();
+  });
+
+  test('scenery：data-fx-motes=0 時不建粒子 canvas；預設有', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    // demo 的 scenery 開了粒子，應該有一個 canvas
+    await expect(page.locator('.mfx-scenery-canvas')).toHaveCount(1);
+    // 動態插入一個「有錨點」但關閉粒子的場景，確認 mount() 真的走到粒子開關那一行、且不建 canvas
+    const nOff = await page.evaluate(() => {
+      var d = document.createElement('div');
+      d.setAttribute('data-fx', 'scenery');
+      d.setAttribute('data-fx-src', 'assets/demo-scene.svg');
+      d.setAttribute('data-fx-anchor', '#scenery-anchor');
+      d.setAttribute('data-fx-motes', '0');
+      d.setAttribute('data-fx-leaves', '0');
+      document.body.appendChild(d);
+      window.MyceliumFX.scenery.start();
+      return document.querySelectorAll('.mfx-scenery-canvas').length;
+    });
+    expect(nOff).toBe(1); // 只有 demo 原本那一個，新插入的（有錨點但粒子數為 0）沒建
+
+    // 再插入一個「有錨點」且開粒子的場景，確認會多建一個 canvas
+    const nOn = await page.evaluate(() => {
+      var d = document.createElement('div');
+      d.setAttribute('data-fx', 'scenery');
+      d.setAttribute('data-fx-src', 'assets/demo-scene.svg');
+      d.setAttribute('data-fx-anchor', '#scenery-anchor');
+      d.setAttribute('data-fx-motes', '20');
+      document.body.appendChild(d);
+      window.MyceliumFX.scenery.start();
+      return document.querySelectorAll('.mfx-scenery-canvas').length;
+    });
+    expect(nOn).toBe(2); // demo 原本那一個 + 新插入且開粒子的這一個
+  });
+
+  test('ambient synth：未互動不出聲；一次手勢後開始，波形有動', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    // 未互動：沒有 running 的 audio context（模組尚未 start）
+    const before = await page.evaluate(() => window.__mfxAudioStarted === true);
+    expect(before).toBeFalsy();
+    // 一次手勢
+    await page.mouse.wheel(0, 200);
+    await page.waitForTimeout(2500);
+    const eqMoved = await page.evaluate(() => {
+      var c = document.querySelector('#ambient-eq');
+      var g = c.getContext('2d');
+      function paint() { var d = g.getImageData(0,0,c.width,c.height).data, n=0;
+        for (var i=3;i<d.length;i+=4) if (d[i]>10) n++; return n; }
+      var a = paint();
+      return new Promise(function (res) { setTimeout(function () { res(a !== paint()); }, 500); });
+    });
+    expect(eqMoved).toBeTruthy();
+  });
+
+  test('ambient：開關是可聚焦的 button', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    const btn = page.locator('.mfx-snd');
+    await expect(btn).toHaveCount(1);
+    expect(await btn.evaluate((el) => el.tagName)).toBe('BUTTON');
+  });
+
+  test('ambient loop：交叉淡接——舊的淡出、新的從 0 淡入、舊的暫停', async ({ page }) => {
+    await page.goto('/effects/loop-fixture.html');
+    // 離散手勢：wheel 對 <audio>.play() 不算 Chrome 認可的手勢（跟 Web Audio
+    // 的 sticky activation 判定不同），要用鍵盤按鍵這種真正離散的手勢才會
+    // 通過媒體自動播放政策。故意不點 .mfx-snd 本身——按鈕自己的 click
+    // 開關邏輯跟全域手勢的 pointerdown 搶手勢會互踩（先 arm+start，
+    // 按鈕的 click 又緊接著判斷「已經 on」而把它關掉），不是這裡要測的東西。
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(300);
+
+    // 先確認手勢後真的開始播放——沒有放寬 autoplay 的 launch flag，
+    // 這一步就是在驗證離散手勢真的有效。
+    const started = await page.evaluate(() => !document.getElementById('la').paused);
+    expect(started).toBeTruthy();
+
+    const result = await page.evaluate(async () => {
+      var container = document.querySelector('[data-fx="ambient"]');
+      var fade = parseFloat(container.getAttribute('data-fx-fade')); // 1.2
+      var A = document.getElementById('la'), B = document.getElementById('lb');
+      var cur = !A.paused ? A : B, nxt = (cur === A) ? B : A;
+      var duration = cur.duration;
+      // 交叉淡接從 duration-fade 開始，逼近到只差 0.3 秒，讓 tick 驅動的
+      // 交叉淡接搶在自然 ended 之前先觸發（不要測到 ended 的保險分支）。
+      cur.currentTime = duration - fade - 0.3;
+
+      function sample() {
+        return {
+          curPaused: cur.paused, nxtPaused: nxt.paused,
+          curVol: cur.volume, nxtVol: nxt.volume,
+          curTime: cur.currentTime, nxtTime: nxt.currentTime,
+        };
+      }
+      function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+      await wait(600); // 過了觸發門檻（0.3s）不久，落在淡接前段
+      var s1 = sample();
+      await wait(500); // 累計 1.1s，落在淡接後段（淡接總長 1.2s，尚未結束）
+      var s2 = sample();
+      await wait(900); // 累計 2.0s，讓淡接（1.5s 結束）與自然結尾都跑完並留餘裕
+      return {
+        fade: fade, duration: duration, s1: s1, s2: s2,
+        after: { curPaused: cur.paused, nxtPaused: nxt.paused },
+      };
+    });
+
+    const VOL = 0.34; // 對齊 mycelium-audio.js loop 引擎的音量常數
+
+    // 淡接前段：兩軌同時在播，進來的那軌剛從 0 重啟，兩邊音量都不是 0 也不是滿的。
+    expect(result.s1.curPaused).toBe(false);
+    expect(result.s1.nxtPaused).toBe(false);
+    expect(result.s1.curTime).toBeLessThan(result.duration); // 還沒到自然結尾，測的是淡接本身
+    expect(result.s1.nxtTime).toBeLessThan(result.fade); // 剛重啟，不是接著原本的進度播
+    expect(result.s1.curVol).toBeGreaterThan(0);
+    expect(result.s1.curVol).toBeLessThan(VOL);
+    expect(result.s1.nxtVol).toBeGreaterThan(0.001);
+    expect(result.s1.nxtVol).toBeLessThan(VOL);
+    expect(result.s1.curVol).toBeGreaterThan(result.s1.nxtVol); // 前段：舊軌音量還高過新軌
+
+    // 淡接後段：音量此消彼長——舊軌降、新軌升，而且交叉點已經過了。
+    expect(result.s2.curVol).toBeLessThan(result.s1.curVol);
+    expect(result.s2.nxtVol).toBeGreaterThan(result.s1.nxtVol);
+    expect(result.s2.nxtVol).toBeGreaterThan(result.s2.curVol);
+
+    // 淡接跑完之後：原本進來的那軌變成唯一在播的，舊軌已經暫停（真的完成了互換）。
+    expect(result.after.nxtPaused).toBe(false);
+    expect(result.after.curPaused).toBe(true);
+  });
 });
