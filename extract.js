@@ -4,6 +4,8 @@ import { getAllRecords, putRecord } from './db.js';
 import { esc } from './util.js';
 import { EXTRACT_SYSTEM, buildExtractUserMessage } from './extract-prompt.js';
 
+const TASK = 'extract';
+
 function parseExtractionJson(text) {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('AI 沒有回傳可解析的 JSON。');
@@ -25,16 +27,25 @@ export async function renderExtractPanel(projectId, container) {
     if (!text) return;
     const status = container.querySelector('#ex-status');
     status.textContent = '分析中…';
+    // Same chatlogs recording pattern as ai-panel.js's runChatTask: log the
+    // user side up front and the assistant side once a reply lands, so the
+    // extraction task's exchange is reviewable afterwards like the other
+    // three AI tasks (chat/consistency/plot) already are — this was the one
+    // task that logged nothing at all.
+    await putRecord(projectId, 'chatlogs', { task: TASK, role: 'user', content: text, createdAt: Date.now() });
     try {
       const entities = await getAllRecords(projectId, 'entities');
       const raw = await chat('extract', [
         { role: 'system', content: EXTRACT_SYSTEM },
         { role: 'user', content: buildExtractUserMessage(entities, text) },
       ]);
+      await putRecord(projectId, 'chatlogs', { task: TASK, role: 'assistant', content: raw, createdAt: Date.now() });
       const result = parseExtractionJson(raw);
       renderCandidates(projectId, container, entities, result);
       status.textContent = '分析完成，請勾選要寫入的項目。';
     } catch (e) {
+      // Matches runChatTask in ai-panel.js: a failed call surfaces the error
+      // in the UI but isn't persisted to chatlogs (only a completed exchange is).
       status.textContent = '分析失敗：' + e.message;
     }
   });

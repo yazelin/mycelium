@@ -75,6 +75,26 @@ test('extracting text produces candidates; applying merges aliases and links rel
   await expect(page.locator('.foreshadow-list li', { hasText: '林小雨的真實身份' })).toHaveCount(1);
 });
 
+test('running an extraction records the exchange to chatlogs, visible afterwards', async ({ page }) => {
+  await page.locator('#ex-text').fill('（章節全文……）');
+  await page.locator('#ex-run').click();
+  await expect(page.locator('#ex-entities li')).toHaveCount(2);
+
+  // extract.js's chatlogs writes land in IndexedDB right away, but #ai-log
+  // was already rendered before the run — leave the AI 助理 tab and come
+  // back (forcing renderAiTab to refetch) the way a reload would.
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  await page.locator('.tab-btn', { hasText: 'AI 助理' }).click();
+
+  await expect(page.locator('.ai-msg.user')).toContainText('（章節全文……）');
+  await expect(page.locator('.ai-msg.assistant').first()).toContainText('entities');
+
+  await page.reload();
+  const aiTabBtn = page.locator('.tab-btn', { hasText: 'AI 助理' });
+  if (!(await aiTabBtn.evaluate((el) => el.classList.contains('active')))) await aiTabBtn.click();
+  await expect(page.locator('.ai-msg.user')).toContainText('（章節全文……）');
+});
+
 test('alias candidate listed before its new-entity target still merges without creating a duplicate', async ({ page }) => {
   // Reverse of MOCK_EXTRACTION's entity order: the alias candidate comes
   // first, its aliasOf target ("城主") is only created afterwards. This is

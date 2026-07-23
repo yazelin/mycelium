@@ -21,6 +21,8 @@ li.overdue { background: #fde2e2; }
 .content-indicator.has-content { color: #2d4a3e; font-weight: bold; }
 .chapter-content-editor { margin-top: .5rem; }
 .entity-edit, .chapter-edit, .foreshadow-edit { margin-top: .5rem; display: flex; flex-direction: column; gap: .35rem; max-width: 30rem; }
+.custom-fields { display: block; margin: .25rem 0; font-size: .9em; color: #333; }
+.foreshadow-links { display: flex; flex-wrap: wrap; gap: .5rem; margin: .25rem 0; font-size: .9em; color: #333; }
 
 #site-footer { padding: 1.5rem 1rem 2rem; text-align: center; }
 .footer-icons { display: flex; gap: .75rem; justify-content: center; align-items: center; }

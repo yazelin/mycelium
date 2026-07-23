@@ -122,6 +122,51 @@ test('editing an entity name preserves its id: an attached relation keeps resolv
   }), { timeout: 5000 }).toEqual({ nodes: 2, edges: 1 });
 });
 
+test('a custom field persists across reload and is included in the AI context', async ({ page }) => {
+  await page.locator('#e-name').fill('林小雨');
+  await page.locator('#e-custom').fill('身高: 165cm\n所屬流派: 落雨劍派');
+  await page.locator('#e-add').click();
+
+  const li = page.locator('.entity-list li');
+  await expect(li).toContainText('身高');
+  await expect(li).toContainText('165cm');
+  await expect(li).toContainText('所屬流派');
+  await expect(li).toContainText('落雨劍派');
+
+  await page.reload();
+  const tabBtn = page.locator('.tab-btn', { hasText: '設定庫' });
+  if (!(await tabBtn.evaluate((el) => el.classList.contains('active')))) await tabBtn.click();
+  const reloadedLi = page.locator('.entity-list li');
+  await expect(reloadedLi).toContainText('身高');
+  await expect(reloadedLi).toContainText('165cm');
+
+  // Configure AI + capture the system message sent for a free-form chat, to
+  // confirm buildContext() (ai-context.js) folds the custom field in.
+  let capturedSystemMessage = null;
+  await page.route('**/chat/completions', async (route) => {
+    const body = route.request().postDataJSON();
+    capturedSystemMessage = body.messages[0].content;
+    await route.fulfill({ json: { choices: [{ message: { role: 'assistant', content: '[mock reply]' } }] } });
+  });
+
+  await page.locator('.tab-btn', { hasText: /^設定$/ }).click();
+  const fieldset = page.locator('fieldset[data-task="default"]');
+  await fieldset.locator('.ai-provider').selectOption('custom');
+  await fieldset.locator('.ai-base').fill('https://example.invalid/v1');
+  await fieldset.locator('.ai-model').fill('test-model');
+  await page.locator('#ai-save').click();
+
+  await page.locator('.tab-btn', { hasText: 'AI 助理' }).click();
+  await page.locator('#ai-input').fill('測試');
+  await page.locator('#ai-send').click();
+  await expect(page.locator('.ai-msg.assistant')).toContainText('[mock reply]');
+
+  expect(capturedSystemMessage).toContain('身高');
+  expect(capturedSystemMessage).toContain('165cm');
+  expect(capturedSystemMessage).toContain('所屬流派');
+  expect(capturedSystemMessage).toContain('落雨劍派');
+});
+
 test('two projects keep separate entity data (db-per-project isolation)', async ({ page }) => {
   await page.locator('#e-name').fill('專案A的角色');
   await page.locator('#e-add').click();
