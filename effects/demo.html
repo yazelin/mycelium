@@ -183,6 +183,7 @@ footer.site a:hover{color:var(--ink);border-color:var(--ink)}
       <a href="#eyelid"><u>eyelid</u>睜眼</a>
       <a href="#scramble"><u>scramble</u>亂序</a>
       <a href="#stutter"><u>stutter</u>重複</a>
+      <a href="#scenery"><u>scenery</u>場景背景</a>
     </nav>
   </div>
 </aside>
@@ -325,6 +326,17 @@ footer.site a:hover{color:var(--ink);border-color:var(--ink)}
     </div>
   </section>
 
+  <!-- ── 場景背景 ─────────────────────────────────────── -->
+  <section class="fx" id="scenery">
+    <p class="eyebrow">&lt;div <b>data-fx="scenery"</b> data-fx-src="assets/demo-scene.svg" data-fx-anchor="#scenery-anchor" data-fx-rise="44"&gt;</p>
+    <h3>場景背景</h3>
+    <p class="desc">一張自帶天空的圖，捲到錨點時從畫面底部迫升。這裡用一張示範風景。</p>
+    <div data-fx="scenery" data-fx-src="assets/demo-scene.svg" data-fx-anchor="#scenery-anchor" data-fx-rise="44"></div>
+    <div style="height:60vh"></div>
+    <p id="scenery-anchor">捲到這一行，背景會升上來。</p>
+    <div style="height:40vh"></div>
+  </section>
+
   </div>
 </main>
 
@@ -344,6 +356,7 @@ footer.site a:hover{color:var(--ink);border-color:var(--ink)}
 </footer>
 
 <script src="mycelium-fx.js"></script>
+<script src="mycelium-scenery.js" defer></script>
 <script>
 /* 示範頁自己的控制程式：只呼叫函式庫公開的 API，不碰內部狀態。
    所有監聽都是 passive，示範頁本身不攔任何輸入。 */

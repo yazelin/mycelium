@@ -343,4 +343,32 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     await page.waitForTimeout(300);
     expect(errors).toEqual([]);
   });
+
+  test('scenery：捲過錨點後背景迫升（--rev 從 0 到 rise）', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    const bg = page.locator('.mfx-scenery-bg').first();
+    await expect(bg).toHaveCount(1);
+    const before = await bg.evaluate((el) => getComputedStyle(el).getPropertyValue('--rev').trim());
+    // 捲到錨點以下
+    await page.evaluate(() => {
+      const a = document.querySelector('[data-fx="scenery"]').getAttribute('data-fx-anchor');
+      document.querySelector(a).scrollIntoView({ block: 'start' });
+      window.scrollBy(0, window.innerHeight);
+    });
+    await page.waitForTimeout(300);
+    const after = await bg.evaluate((el) => getComputedStyle(el).getPropertyValue('--rev').trim());
+    expect(parseFloat(before)).toBeLessThan(5);
+    expect(parseFloat(after)).toBeGreaterThan(20);
+  });
+
+  test('scenery：prefers-reduced-motion 時直接完全露出、無粒子 canvas', async ({ browser }) => {
+    const ctx = await browser.newContext({ reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    await page.goto('/effects/demo.html');
+    const rev = await page.locator('.mfx-scenery-bg').first()
+      .evaluate((el) => getComputedStyle(el).getPropertyValue('--rev').trim());
+    expect(parseFloat(rev)).toBeGreaterThan(90);
+    expect(await page.locator('.mfx-scenery-canvas').count()).toBe(0);
+    await ctx.close();
+  });
 });

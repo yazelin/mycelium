@@ -104,3 +104,21 @@
 .mfx-off .mfx-eyelid-hint,
 .mfx-off .mfx-echo { display: none !important; }
 .mfx-off .mfx-ch { transform: none !important; }
+
+/* 場景背景：固定全視窗，遮罩由下往上露出（--rev 控制），上緣淡出好接天空。 */
+.mfx-scenery-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-position: bottom center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  -webkit-mask-image: linear-gradient(0deg, #000 0%, #000 var(--rev, 0%), transparent calc(var(--rev, 0%) + 14%));
+  mask-image: linear-gradient(0deg, #000 0%, #000 var(--rev, 0%), transparent calc(var(--rev, 0%) + 14%));
+}
+.mfx-scenery-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
