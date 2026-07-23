@@ -6,6 +6,28 @@ function splitList(value) {
   return value.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+// Custom fields (spec: entity schema is name/aliases/type/tags/notes + 自訂欄位)
+// are entered as one "欄位名: 值" pair per line rather than a dynamic
+// add/remove-row widget — same "no build step, keep it a few dozen lines"
+// spirit as splitList()'s comma-separated inputs above. Accept both the
+// half-width and full-width colon since this is Traditional Chinese UI copy.
+function parseCustomFields(text) {
+  return text.split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const idx = line.search(/[:：]/);
+      return idx === -1
+        ? { key: line, value: '' }
+        : { key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    })
+    .filter((f) => f.key);
+}
+
+function customFieldsToText(fields) {
+  return (fields || []).map((f) => `${f.key}: ${f.value}`).join('\n');
+}
+
 export async function renderEntitiesTab(projectId, container) {
   const entities = await getAllRecords(projectId, 'entities');
 
@@ -17,6 +39,7 @@ export async function renderEntitiesTab(projectId, container) {
       <input id="e-type" placeholder="類型（人物/地點/勢力/概念…）">
       <input id="e-tags" placeholder="標籤（逗號分隔）">
       <textarea id="e-notes" placeholder="備註/設定內容"></textarea>
+      <textarea id="e-custom" placeholder="自訂欄位（每行一個，格式：欄位名: 值，例如「身高: 178cm」）"></textarea>
       <button id="e-add" type="button">新增</button>
     </section>
     <ul class="entity-list">
@@ -28,6 +51,7 @@ export async function renderEntitiesTab(projectId, container) {
             <span class="type">${esc(e.type)}</span>
             ${e.tags && e.tags.length ? `<span class="tags">標籤：${e.tags.map(esc).join('、')}</span>` : ''}
             <p>${esc(e.notes)}</p>
+            ${e.customFields && e.customFields.length ? `<span class="custom-fields">${e.customFields.map((f) => `${esc(f.key)}：${esc(f.value)}`).join('；')}</span>` : ''}
             <button class="e-edit-toggle" type="button">編輯</button>
             <button class="e-delete" type="button">刪除</button>
           </div>
@@ -37,6 +61,7 @@ export async function renderEntitiesTab(projectId, container) {
             <input class="e-edit-type" value="${esc(e.type)}" placeholder="類型（人物/地點/勢力/概念…）">
             <input class="e-edit-tags" value="${esc((e.tags || []).join(', '))}" placeholder="標籤（逗號分隔）">
             <textarea class="e-edit-notes" placeholder="備註/設定內容">${esc(e.notes)}</textarea>
+            <textarea class="e-edit-custom" placeholder="自訂欄位（每行一個，格式：欄位名: 值）">${esc(customFieldsToText(e.customFields))}</textarea>
             <button class="e-save" type="button">儲存</button>
             <button class="e-cancel" type="button">取消</button>
           </div>
@@ -53,6 +78,7 @@ export async function renderEntitiesTab(projectId, container) {
       type: container.querySelector('#e-type').value.trim(),
       tags: splitList(container.querySelector('#e-tags').value),
       notes: container.querySelector('#e-notes').value.trim(),
+      customFields: parseCustomFields(container.querySelector('#e-custom').value),
     });
     renderEntitiesTab(projectId, container);
   });
@@ -103,6 +129,7 @@ export async function renderEntitiesTab(projectId, container) {
         li.querySelector('.e-edit-type').value = entity.type;
         li.querySelector('.e-edit-tags').value = (entity.tags || []).join(', ');
         li.querySelector('.e-edit-notes').value = entity.notes;
+        li.querySelector('.e-edit-custom').value = customFieldsToText(entity.customFields);
       }
       li.querySelector('.entity-edit').hidden = true;
       li.querySelector('.entity-view').hidden = false;
@@ -124,6 +151,7 @@ export async function renderEntitiesTab(projectId, container) {
         type: li.querySelector('.e-edit-type').value.trim(),
         tags: splitList(li.querySelector('.e-edit-tags').value),
         notes: li.querySelector('.e-edit-notes').value.trim(),
+        customFields: parseCustomFields(li.querySelector('.e-edit-custom').value),
       });
       renderEntitiesTab(projectId, container);
     });

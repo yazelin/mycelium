@@ -111,6 +111,43 @@ test('cancelling a foreshadow edit discards the changes without writing', async 
   await expect(li.locator('.f-edit-notes')).toHaveValue('原備註。');
 });
 
+test('linking a foreshadow to an entity displays it, survives an entity rename (id preserved), and degrades gracefully when the entity is deleted', async ({ page }) => {
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  await page.locator('#e-name').fill('林小雨');
+  await page.locator('#e-add').click();
+  await expect(page.locator('.entity-list li')).toHaveCount(1);
+
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await page.locator('#f-title').fill('林小雨的驚人身世');
+  await page.locator('#f-entities').selectOption({ label: '林小雨' });
+  await page.locator('#f-add').click();
+
+  const item = page.locator('.foreshadow-list li', { hasText: '林小雨的驚人身世' });
+  await expect(item.locator('.foreshadow-links')).toContainText('林小雨');
+
+  // Rename the entity via the id-preserving inline edit — the foreshadow's
+  // relatedEntityIds link must follow the id, not go stale.
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const entityLi = page.locator('.entity-list li', { hasText: '林小雨' });
+  await entityLi.locator('.e-edit-toggle').click();
+  await entityLi.locator('.e-edit-name').fill('林小雨・落雨劍客');
+  await entityLi.locator('.e-save').click();
+
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await expect(item.locator('.foreshadow-links')).toContainText('林小雨・落雨劍客');
+
+  // Delete the entity outright (no relations attached, so no confirm() fires)
+  // — the foreshadow link must degrade to 「已刪除」, matching graph.js's
+  // established pattern for a dangling relation, not break the tab.
+  await page.locator('.tab-btn', { hasText: '設定庫' }).click();
+  const renamedLi = page.locator('.entity-list li', { hasText: '林小雨・落雨劍客' });
+  await renamedLi.locator('.e-delete').click();
+  await expect(page.locator('.entity-list li')).toHaveCount(0);
+
+  await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
+  await expect(item.locator('.foreshadow-links')).toContainText('（已刪除）');
+});
+
 test('changing a foreshadow status via the inline select moves it between status groups and clears the overdue flag', async ({ page }) => {
   await page.locator('.tab-btn', { hasText: '伏筆追蹤' }).click();
   await page.locator('#f-title').fill('林小雨的驚人身世');
