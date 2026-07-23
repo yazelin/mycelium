@@ -70,6 +70,13 @@ test.describe('mycelium-fx 敘事效果庫', () => {
 
   test('freeze 不會在頁面剛載入時觸發', async ({ page }) => {
     await page.goto(FIXTURE);
+    // fixture 最上面是 eyelid，第一次捲動輸入本來就該被它吃掉、
+    // 拿去推開合度（#40），所以先等黑幕掛上、再用鍵盤逃生出口的手法
+    // （直接改 scrollY）跳過開場，這樣才是在測 freeze 本身，不是在測 eyelid。
+    await page.waitForSelector('.mfx-eyelid');
+    await scrollTo(page, 50);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('done');
+
     // 還沒過緩衝期就直接捲——不可以被吃掉。
     const before = await page.evaluate(() => window.scrollY);
     await page.mouse.wheel(0, 300);
@@ -157,6 +164,75 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     await page.waitForTimeout(700);
     expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('user-open');
     await expect(page.locator('.mfx-eyelid')).toHaveCount(1);
+  });
+
+  test('eyelid 睜眼靠滾輪推進的整個過程，scrollY 全程不動，開場文字全程留在畫面上（#40）', async ({ page }) => {
+    await page.goto(FIXTURE);
+    // 等 eyelid 真的掛上（mfx-eyelid 的黑幕出現），再開始送滾輪——
+    // 不然第一次 wheel 有機會搶在腳本掛上黑幕之前先讓瀏覽器原生捲走。
+    await page.waitForSelector('.mfx-eyelid');
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    // 縫的階段：分好幾段慢慢捲，每段刻意留在 openPx 一半以內，
+    // 這樣才是在測「還沒開完」的縫階段，不會不小心一路捲到全開。
+    const openPx = await page.evaluate(() => {
+      const el = document.getElementById('eyelid-a');
+      return parseFloat(el.getAttribute('data-fx-open')) * window.innerHeight / 100;
+    });
+    const step = Math.floor(openPx / 10);
+    const samples = [];
+    for (let i = 0; i < 4; i++) {
+      await page.mouse.wheel(0, step);
+      await page.waitForTimeout(60);
+      samples.push(await page.evaluate(() => window.scrollY));
+      await expect(page.locator('#eyelid-a p')).toBeVisible();
+    }
+    expect(samples.every((y) => y === 0)).toBe(true);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('user-open');
+    await expect(page.locator('.mfx-eyelid')).toHaveCount(1); // 還沒開完
+
+    // 繼續捲到全開：scrollY 仍然是 0，開場段落仍然在畫面上。
+    await page.mouse.wheel(0, openPx * 2);
+    await page.waitForTimeout(150);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('done');
+    await expect(page.locator('.mfx-eyelid')).toHaveCount(0);
+    await expect(page.locator('#eyelid-a p')).toBeVisible();
+  });
+
+  test('手動捲開與自動展開，全開後的畫面位置完全一致（都不會捲走頁面）（#40）', async ({ page }) => {
+    // 手動滾輪捲開那條路：黑幕一掛上就立刻送大量捲動，趕在自動展開的
+    // 保險（400ms）前完成，同一頁重用，避免另開 context 拖慢時序。
+    await page.goto(FIXTURE);
+    await page.waitForSelector('.mfx-eyelid');
+    await page.mouse.wheel(0, 2000);
+    await page.waitForTimeout(150);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('done');
+    const manualY = await page.evaluate(() => window.scrollY);
+
+    // 自動展開那條路（#37 的 7 秒保險，這裡把延遲壓短測）——重新載入同一頁。
+    await page.goto(FIXTURE);
+    await page.waitForTimeout(430 + 450);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('done');
+    const autoY = await page.evaluate(() => window.scrollY);
+
+    expect(manualY).toBe(autoY);
+    expect(manualY).toBe(0); // 兩條路都不該捲動頁面
+  });
+
+  test('鍵盤捲動這種逃生出口不會被 eyelid 攔截：一旦真的捲動就視為跳過開場、直接全開（#40）', async ({ page }) => {
+    await page.goto(FIXTURE);
+    await page.waitForSelector('.mfx-eyelid'); // 等黑幕掛上再按鍵，避免搶跑
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('waiting');
+
+    await page.locator('body').press('PageDown');
+    await page.waitForTimeout(150);
+
+    // 鍵盤本身完全沒被吃掉：頁面真的捲動了。
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    // eyelid 視為「跳過開場」，直接全開消失，不會卡在半開。
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('done');
+    await expect(page.locator('.mfx-eyelid')).toHaveCount(0);
   });
 
   test('scramble 只改視覺：DOM 文字仍然是原文', async ({ page }) => {
