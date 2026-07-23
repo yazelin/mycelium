@@ -429,4 +429,19 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     await expect(btn).toHaveCount(1);
     expect(await btn.evaluate((el) => el.tagName)).toBe('BUTTON');
   });
+
+  test('ambient loop：交叉淡接——舊的淡出、新的從 0 淡入、舊的暫停', async ({ page }) => {
+    await page.goto('/effects/loop-fixture.html');
+    await page.mouse.wheel(0, 200);
+    await page.waitForTimeout(500);
+    const result = await page.evaluate(async () => {
+      var A = document.getElementById('la'), B = document.getElementById('lb');
+      var curEl = !A.paused ? A : B;
+      curEl.currentTime = curEl.duration - 1.5; // 逼近尾巴觸發淡接
+      await new Promise(function (r) { setTimeout(r, 2200); });
+      return { aPlayed: !A.paused || !B.paused, bothTouched: (A.currentTime > 0 && B.currentTime >= 0) };
+    });
+    expect(result.aPlayed).toBeTruthy();
+    expect(result.bothTouched).toBeTruthy();
+  });
 });

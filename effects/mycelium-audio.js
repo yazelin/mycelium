@@ -189,9 +189,82 @@
     };
   }
 
+  // ---- loop 引擎：檔案交叉淡接（file:// 相容，用 <audio> + volume，不用 fetch/decodeAudioData） ----
+  function mountLoop(el) {
+    var src = el.getAttribute('data-fx-src');
+    var fade = num(el, 'data-fx-fade', 5, 1, 20);
+    var VOL = 0.34;
+    var A = document.createElement('audio'), B = document.createElement('audio');
+    A.src = B.src = src; A.preload = B.preload = 'auto';
+    document.body.appendChild(A); document.body.appendChild(B);
+    A.id = A.id || 'la'; B.id = B.id || 'lb';
+    var cur = A, nxt = B, on = false, env = 0, envTarget = 0, fading = false, fadeT0 = 0, raf = 0, started = false;
+
+    // 波形：優先用離線頻譜（data-fx-eqdata，供 file://）；沒有就試 AnalyserNode（http）。
+    var spec = null, eqAttr = el.getAttribute('data-fx-eqdata');
+    if (eqAttr) { var bin = atob(eqAttr); spec = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) spec[i] = bin.charCodeAt(i); }
+    var eqCanvas = el.getAttribute('data-fx-eq') ? document.querySelector(el.getAttribute('data-fx-eq')) : null;
+    var drawEq = makeEq(eqCanvas, function () {
+      if (!spec) return null;
+      var f = Math.floor(cur.currentTime * 20) * 32, out = new Float32Array(32);
+      for (var i = 0; i < 32; i++) out[i] = (f + i < spec.length ? spec[f + i] : 0) / 255;
+      return out;
+    });
+
+    function tick() {
+      raf = requestAnimationFrame(tick);
+      var now = performance.now() / 1000;
+      if (env < envTarget) env = Math.min(envTarget, env + (1 / 6) * 0.016);
+      else if (env > envTarget) env = Math.max(envTarget, env - (1 / 1.8) * 0.016);
+      if (on && cur.duration) {
+        if (!fading && cur.currentTime > cur.duration - fade) {
+          try { nxt.currentTime = 0; nxt.play(); } catch (e) {}
+          fading = true; fadeT0 = now;
+        }
+        if (fading) {
+          var p = Math.min(1, (now - fadeT0) / fade);
+          cur.volume = env * VOL * Math.cos(p * Math.PI / 2);
+          nxt.volume = env * VOL * Math.sin(p * Math.PI / 2);
+          if (p >= 1) { try { cur.pause(); } catch (e) {} var t = cur; cur = nxt; nxt = t; fading = false; }
+        } else { cur.volume = env * VOL; nxt.volume = 0; }
+      } else { cur.volume = env * VOL; }
+      if (drawEq && !reduce) drawEq(on);
+    }
+
+    // 背景分頁保險：rAF 在分頁背景/隱藏時會被瀏覽器暫停，如果背景太久、
+    // 曲目播到結尾，交叉淡接的 tick 迴圈不會被叫到，聲音就會直接停掉。
+    // 用 <audio> 原生的 'ended' 事件補洞——ended 在背景分頁仍會正常觸發
+    // （媒體本身照樣播放，只是 rAF 停了），所以用它硬切到另一軌重播，
+    // 保證背景也不斷聲；前景時交叉淡接照樣會先於 ended 平順接上。
+    function onEnded(e) {
+      if (!on || e.target !== cur) return;
+      try { nxt.currentTime = 0; nxt.volume = env * VOL; nxt.play(); } catch (err) {}
+      var t = cur; cur = nxt; nxt = t; fading = false;
+    }
+    A.addEventListener('ended', onEnded);
+    B.addEventListener('ended', onEnded);
+
+    document.addEventListener('visibilitychange', function () {
+      if (on && !document.hidden) { try { cur.play(); } catch (e) {} }
+    });
+    return {
+      start: function () {
+        try { cur.play(); } catch (e) {}
+        global.__mfxAudioStarted = true;
+        envTarget = 1; on = true;
+        if (!started) { started = true; tick(); }
+      },
+      stop: function () {
+        envTarget = 0; on = false;
+        setTimeout(function () { if (!on) { try { A.pause(); B.pause(); } catch (e) {} } }, 2000);
+      }
+    };
+  }
+
   // ---- 開關 + 手勢自動播（兩模式共用） ----
   function attach(el) {
-    var player = mountSynth(el); // Task 4 會在此依 data-fx-src 分派 loop/synth
+    var player = el.getAttribute('data-fx-src') ? mountLoop(el) : mountSynth(el);
     var btn = document.createElement('button');
     btn.className = 'mfx-snd'; btn.type = 'button';
     btn.textContent = '♪　開啟聲音'; // ♪ 開啟聲音
