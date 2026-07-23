@@ -177,7 +177,17 @@ async function refreshProposals(projectId, container) {
   status.textContent = `找到 ${result.items.length} 份提案（新到舊排序）：`;
   listEl.innerHTML = result.items.map((item, i) => {
     if (!item.valid) {
-      return `<li><strong>${esc(item.name)}</strong> — <span class="pr-invalid">格式不正確，無法套用${item.error ? `（${esc(item.error)}）` : ''}</span></li>`;
+      // 'invalid' means the file was read but its content is actually
+      // broken — that's the only case worded as 「格式不正確」. 'gone' /
+      // 'auth' / 'fetch' mean the file couldn't be read at all (moved,
+      // deleted, bad token, transport error); item.error is already a
+      // complete sentence for those and must never be relabelled as a
+      // format problem (issue #27 — a post-apply 404 was misreported as
+      // 「格式不正確」, which is exactly this distinction).
+      const msg = item.errorKind === 'invalid'
+        ? `格式不正確，無法套用${item.error ? `（${esc(item.error)}）` : ''}`
+        : esc(item.error || '讀取失敗，無法套用。');
+      return `<li><strong>${esc(item.name)}</strong> — <span class="pr-invalid">${msg}</span></li>`;
     }
     const d = item.data;
     const counts = `角色候選 ${d.entities.length}、關係候選 ${d.relations.length}、伏筆候選 ${d.foreshadow.length}`;
