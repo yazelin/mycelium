@@ -20,11 +20,6 @@ export default defineConfig({
     name: 'desktop',
     use: {
       ...devices['Desktop Chrome'],
-      // loop 模式的 <audio> 元素播放受 Chrome 的媒體自動播放政策管控——
-      // 該政策只認 click/touchend/keydown 之類的「離散」手勢，滑輪捲動
-      // 不算數（跟 Web Audio API 的 sticky activation 判定不同）。放寬這
-      // 個 flag 讓測試環境的 page.mouse.wheel() 手勢也能觸發 <audio>.play()。
-      launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
     },
   }],
 });

@@ -432,16 +432,69 @@ test.describe('mycelium-fx 敘事效果庫', () => {
 
   test('ambient loop：交叉淡接——舊的淡出、新的從 0 淡入、舊的暫停', async ({ page }) => {
     await page.goto('/effects/loop-fixture.html');
-    await page.mouse.wheel(0, 200);
-    await page.waitForTimeout(500);
+    // 離散手勢：wheel 對 <audio>.play() 不算 Chrome 認可的手勢（跟 Web Audio
+    // 的 sticky activation 判定不同），要用鍵盤按鍵這種真正離散的手勢才會
+    // 通過媒體自動播放政策。故意不點 .mfx-snd 本身——按鈕自己的 click
+    // 開關邏輯跟全域手勢的 pointerdown 搶手勢會互踩（先 arm+start，
+    // 按鈕的 click 又緊接著判斷「已經 on」而把它關掉），不是這裡要測的東西。
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(300);
+
+    // 先確認手勢後真的開始播放——沒有放寬 autoplay 的 launch flag，
+    // 這一步就是在驗證離散手勢真的有效。
+    const started = await page.evaluate(() => !document.getElementById('la').paused);
+    expect(started).toBeTruthy();
+
     const result = await page.evaluate(async () => {
+      var container = document.querySelector('[data-fx="ambient"]');
+      var fade = parseFloat(container.getAttribute('data-fx-fade')); // 1.2
       var A = document.getElementById('la'), B = document.getElementById('lb');
-      var curEl = !A.paused ? A : B;
-      curEl.currentTime = curEl.duration - 1.5; // 逼近尾巴觸發淡接
-      await new Promise(function (r) { setTimeout(r, 2200); });
-      return { aPlayed: !A.paused || !B.paused, bothTouched: (A.currentTime > 0 && B.currentTime >= 0) };
+      var cur = !A.paused ? A : B, nxt = (cur === A) ? B : A;
+      var duration = cur.duration;
+      // 交叉淡接從 duration-fade 開始，逼近到只差 0.3 秒，讓 tick 驅動的
+      // 交叉淡接搶在自然 ended 之前先觸發（不要測到 ended 的保險分支）。
+      cur.currentTime = duration - fade - 0.3;
+
+      function sample() {
+        return {
+          curPaused: cur.paused, nxtPaused: nxt.paused,
+          curVol: cur.volume, nxtVol: nxt.volume,
+          curTime: cur.currentTime, nxtTime: nxt.currentTime,
+        };
+      }
+      function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+      await wait(600); // 過了觸發門檻（0.3s）不久，落在淡接前段
+      var s1 = sample();
+      await wait(500); // 累計 1.1s，落在淡接後段（淡接總長 1.2s，尚未結束）
+      var s2 = sample();
+      await wait(900); // 累計 2.0s，讓淡接（1.5s 結束）與自然結尾都跑完並留餘裕
+      return {
+        fade: fade, duration: duration, s1: s1, s2: s2,
+        after: { curPaused: cur.paused, nxtPaused: nxt.paused },
+      };
     });
-    expect(result.aPlayed).toBeTruthy();
-    expect(result.bothTouched).toBeTruthy();
+
+    const VOL = 0.34; // 對齊 mycelium-audio.js loop 引擎的音量常數
+
+    // 淡接前段：兩軌同時在播，進來的那軌剛從 0 重啟，兩邊音量都不是 0 也不是滿的。
+    expect(result.s1.curPaused).toBe(false);
+    expect(result.s1.nxtPaused).toBe(false);
+    expect(result.s1.curTime).toBeLessThan(result.duration); // 還沒到自然結尾，測的是淡接本身
+    expect(result.s1.nxtTime).toBeLessThan(result.fade); // 剛重啟，不是接著原本的進度播
+    expect(result.s1.curVol).toBeGreaterThan(0);
+    expect(result.s1.curVol).toBeLessThan(VOL);
+    expect(result.s1.nxtVol).toBeGreaterThan(0.001);
+    expect(result.s1.nxtVol).toBeLessThan(VOL);
+    expect(result.s1.curVol).toBeGreaterThan(result.s1.nxtVol); // 前段：舊軌音量還高過新軌
+
+    // 淡接後段：音量此消彼長——舊軌降、新軌升，而且交叉點已經過了。
+    expect(result.s2.curVol).toBeLessThan(result.s1.curVol);
+    expect(result.s2.nxtVol).toBeGreaterThan(result.s1.nxtVol);
+    expect(result.s2.nxtVol).toBeGreaterThan(result.s2.curVol);
+
+    // 淡接跑完之後：原本進來的那軌變成唯一在播的，舊軌已經暫停（真的完成了互換）。
+    expect(result.after.nxtPaused).toBe(false);
+    expect(result.after.curPaused).toBe(true);
   });
 });

@@ -200,7 +200,9 @@
     A.id = A.id || 'la'; B.id = B.id || 'lb';
     var cur = A, nxt = B, on = false, env = 0, envTarget = 0, fading = false, fadeT0 = 0, raf = 0, started = false;
 
-    // 波形：優先用離線頻譜（data-fx-eqdata，供 file://）；沒有就試 AnalyserNode（http）。
+    // 波形：loop 模式只認預先算好的離線頻譜（data-fx-eqdata）；沒有這個屬性
+    // 就維持平線——loop 播的是外部音檔，設計上不接 AnalyserNode（不是退而
+    // 求其次的 fallback，是刻意不做，避免 file:// 環境因解碼/CORS 限制整組壞掉）。
     var spec = null, eqAttr = el.getAttribute('data-fx-eqdata');
     if (eqAttr) { var bin = atob(eqAttr); spec = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) spec[i] = bin.charCodeAt(i); }
@@ -239,6 +241,7 @@
     // 保證背景也不斷聲；前景時交叉淡接照樣會先於 ended 平順接上。
     function onEnded(e) {
       if (!on || e.target !== cur) return;
+      if (fading) return; // 交叉淡接已經在跑，讓 tick 自己收尾，這裡不搶著把新軌拉回 0
       try { nxt.currentTime = 0; nxt.volume = env * VOL; nxt.play(); } catch (err) {}
       var t = cur; cur = nxt; nxt = t; fading = false;
     }
