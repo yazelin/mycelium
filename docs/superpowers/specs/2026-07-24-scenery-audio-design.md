@@ -80,13 +80,31 @@
 
 ## 模組二：`ambient`（環境配樂＋波形）
 
+### 兩種發聲模式（實作序章頁時學到的取捨）
+
+實際做序章頁時發現：純合成（正弦波）**單薄**，比不上專業製作的音檔——差在音色、起音質感、殘響與母帶處理，那些合成補不回來。所以這個模組給兩種模式，各服務不同需求：
+
+| 模式 | 觸發 | 音質 | 代價 |
+|---|---|---|---|
+| **loop（檔案交叉淡接）** | 給 `data-fx-src` | 好（真樂器） | 要一個音檔；有授權責任 |
+| **synth（即時合成）** | 給 `data-fx-preset` | 單薄但乾淨 | 不用檔案、無限不重複、零授權 |
+
+兩者都給，作者依「好聽」還是「不用檔案」自己選。同時給 `src` 時 loop 優先；兩者都沒給時用預設 preset `soft-f`。
+
 ### 用法
 
 ```html
+<!-- loop 模式：好聽，用檔案 -->
+<div data-fx="ambient"
+     data-fx-src="assets/ambient.mp3"   音檔；用雙 audio 交叉淡接無縫循環
+     data-fx-fade="5"                   交叉淡接秒數，預設 5
+     data-fx-eq="#eq"                   選用：波形折線
+     data-fx-eqdata="…base64…"></div>   選用：離線算好的頻譜（file:// 用；見下）
+
+<!-- synth 模式：不用檔案 -->
 <div data-fx="ambient"
      data-fx-preset="soft-f"    內附預設，預設值 soft-f
-     data-fx-eq="#eq"           選用：把即時波形畫到這個 canvas
-     data-fx-autostart="1"></div>   選用：使用者上次開過就自動接續（仍需先互動），預設 1
+     data-fx-eq="#eq"></div>
 ```
 
 進階自訂預設（在載入 `mycelium-audio.js` 之後、頁面自己的 script 裡）：
@@ -102,28 +120,44 @@ MyceliumFX.ambientPreset('mytune', {
 });
 ```
 
-### 行為
+### 共通行為（兩模式都適用）
 
-- 全部即時合成，不載入任何音檔，所以循環不重複、沒有 loop 接點。
+- 瀏覽器不允許未經互動自動出聲，所以掛在第一個使用者手勢（wheel / touchstart / pointerdown / keydown / click）上才發聲並淡入。
+- 自動生一顆開關按鈕（右上角，樣式在 CSS）。狀態記在 localStorage（`fx-bgm`）：上次關掉就尊重，不自己開。前 10 秒清楚顯示，之後退到低調。
+- **切到別的分頁不停**（背景繼續播）；回來若被系統暫停就續播。
+- 總音量用漸進包絡淡入（約 6 秒）／淡出（約 1.8 秒）。
+
+### loop 模式行為
+
+- 兩個同一 `src` 的 `<audio>` 輪流播；當播放中那個剩 `fade` 秒到尾巴，另一個從 0 開始，等功率交叉（`cos`/`sin`）淡接，把結尾溶進開頭，接縫聽不出來、無爆音。
+- 不用 `fetch`／`decodeAudioData`（那在 `file://` 會被 CORS 擋），純靠 `<audio>` 元素 + `volume`，所以雙擊 `file://` 也能用。
+
+### synth 模式行為
+
+- 即時合成、不載入音檔，循環不重複、沒有 loop 接點。
 - 排程用兩時鐘 lookahead：`setInterval` 走步進計數器，音符一律排在 `ctx.currentTime` 之前 `LOOKAHEAD` 秒；所有增益變化用 context time（`setValueAtTime` / `linearRampToValueAtTime`），不用 `setTimeout`。（做法對齊 Roll Formosa 的 bgm.js。）
-- 瀏覽器不允許未經互動自動出聲，所以掛在第一個使用者手勢（wheel / touchstart / keydown / click）上才 resume 並淡入。
-- 自動生一顆開關按鈕（右上角，樣式在 CSS）。狀態記在 localStorage（`fx-bgm`）：上次關掉就尊重，不自己開。
-- 分頁切走停排程，回來接上，不補排。
-- 若 `data-fx-eq` 指到一個 canvas，就掛一個 `AnalyserNode`（fftSize 256、smoothing 0.5），把頻譜畫成一條中線上下跳的折線。
+- 正弦音色、柔起音、長延音；殘響尾巴長；留白多。
+
+### 波形折線（選用）
+
+- 若 `data-fx-eq` 指到 canvas，畫一條中線上下跳的折線（32 點、平滑）。
+- **synth 模式或 http 下的 loop 模式**：掛 `AnalyserNode`（fftSize 256、smoothing 0.5）即時讀頻譜。
+- **`file://` 下的 loop 模式**：`AnalyserNode` 讀媒體檔會被當跨來源而回全零——這是瀏覽器限制。所以接受選用的 `data-fx-eqdata`（離線先算好的 base64 頻譜，20fps×32 對數分頻），用 `currentTime` 查表。沒給就波形不動（不報錯）。抽頻譜的做法只寫進 README 食譜。
+- `prefers-reduced-motion: reduce` 時折線停止繪製（避免持續動畫）；聲音本身不受影響。
 
 ### 內附預設 `soft-f`
 
-一段 F 大調、約 100 BPM、留白多的環境音：和聲 Fmaj7–Cadd9–Dsus4–Am 四小節循環，旋律 64 步稀疏、大量休止，偶爾一顆高八度泛光。這是純音樂參數，不是任何作品的專屬素材。
+一段 F 大調、約 76 BPM、留白多、延音長的空靈環境音：和聲 Fmaj7–Cadd9–Dsus4–Am 四小節循環，旋律 64 步稀疏、大量休止，偶爾一顆高八度泛光。這是純音樂參數，不是任何作品的專屬素材。
 
-### reduced-motion / 無障礙
+### 無障礙
 
-- `prefers-reduced-motion: reduce` 不影響「聲音」本身（聲音不是動態視覺），但波形折線停止繪製（避免持續動畫）。
 - 開關按鈕是真的 `<button>`，可鍵盤操作、有 `aria`。
-- 預設**不自動出聲**，一定要使用者主動（手勢後才 resume，且 localStorage 沒被關過）。
+- 預設**不自動出聲**，一定要使用者主動（第一個手勢後才發聲，且 localStorage 沒被關過）。
 
 ### 不做
 
-- 不收「從音檔抽參數」的工具（ffmpeg + numpy）進 repo。那是作者端一次性的作曲前置，只寫進 README 當食譜。
+- 不收「從音檔抽參數／抽頻譜」的工具（ffmpeg + numpy）進 repo。那是作者端一次性前置，只寫進 README 當食譜。
+- 不內附任何音檔。loop 模式的 `src` 由各作品自己給（授權自負）。
 - 不做多軌混音介面。就是一段環境床音 + 選用波形。
 
 ## 資料流與相依
@@ -149,12 +183,17 @@ mycelium-fx.css      ← 三者共用樣式表（追加場景層、開關）
 - `prefers-reduced-motion` 時直接 100% 露出、沒有 canvas 粒子節點。
 - `data-fx-motes="0"` 時不建塵粒 canvas。
 
-**ambient**
+**ambient（synth 模式，demo 用這個免帶檔案）**
 - demo 的 ambient 區塊載入、無 console 錯誤。
-- 頁面載入且**未互動**時，沒有 AudioContext 出聲（master gain 為 0 或 context 未建）。
-- 點開關後有聲（用 AnalyserNode 讀到波形在動，或 context state 為 running 且 master gain 上升）。
+- 頁面載入且**未互動**時不出聲（AudioContext 未建或 master gain 為 0）。
+- 點開關後有聲（AnalyserNode 讀到波形在動，或 context running 且 gain 上升）。
 - 開關是可聚焦的 `<button>`。
-- `data-fx-eq` 指的 canvas 在播放時有被畫（非全透明像素 > 0）。
+- `data-fx-eq` 指的 canvas 在播放時有被畫（非透明像素 > 0）。
+
+**ambient（loop 模式）**
+- 給 `data-fx-src` 時建立兩個 `<audio>`、不建 synth 排程器。
+- 交叉淡接：把播放中的元素快轉到剩 `fade` 秒，驗證另一個從 0 進場、兩者 volume 等功率交叉、舊的淡完暫停。（用 http server 上的測試音檔。）
+- `data-fx-src` 與 `data-fx-preset` 同時給時，走 loop、不建 synth。
 
 **共通**
 - demo 整頁載入無 console 錯誤（沿用現有那條，涵蓋三個檔）。
