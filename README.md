@@ -112,6 +112,49 @@ ln -s ~/mycelium/skills/mycelium ~/.claude/skills/mycelium
 **示範頁（可即時拉滑桿調參數）：<https://yazelin.github.io/mycelium/>**
 手感這種東西看說明是判斷不出來的，要自己捲一次。
 
+### 場景與聲音（選用模組）
+
+場景與聲音是兩個較重的選用模組，各自獨立載入：
+
+```html
+<script src="effects/mycelium-scenery.js" defer></script>   <!-- 場景背景 -->
+<script src="effects/mycelium-audio.js" defer></script>     <!-- 環境配樂 -->
+```
+
+```html
+<!-- 場景背景：一張自帶天空的圖，捲到錨點時從底部迫升 -->
+<div data-fx="scenery" data-fx-src="場景.webp" data-fx-anchor=".situp"
+     data-fx-rise="44" data-fx-motes="90" data-fx-leaves="10" data-fx-shade="1"></div>
+
+<!-- 環境配樂・好聽（用你自己的 CC 音檔，無縫循環） -->
+<div data-fx="ambient" data-fx-src="ambient.mp3" data-fx-fade="5"
+     data-fx-eq="#eq" data-fx-eqdata="…離線頻譜 base64…"></div>
+
+<!-- 環境配樂・不用檔案（即時合成，音色較單薄但零授權、無限不重複） -->
+<div data-fx="ambient" data-fx-preset="soft-f" data-fx-eq="#eq"></div>
+```
+
+自訂合成預設：
+
+```js
+MyceliumFX.ambientPreset('mytune', { bpm, chords, bass, scale, melody });
+```
+
+### 素材生成食譜（作者端一次性，不進 code）
+
+**場景圖**（給 `data-fx-src`）——用 codex-imagegen 產一張自帶天空的插畫，上緣淡到近白好接頁面：
+
+> 提示詞要點：意識界／輕小說風、低視角、自帶天空且頂端近白、單張全景、無人物文字。生出後可選在本機去背或直接用不透明圖。
+
+**loop 波形頻譜**（給 `data-fx-eqdata`，供 `file://` 顯示波形）——`file://` 下 AnalyserNode 讀不到媒體檔頻譜，所以離線先算好：
+
+```python
+# ffmpeg 解碼 → 每 1/20 秒取 32 條對數分頻（60Hz–8kHz）→ log 壓縮 → base64
+# （完整腳本見 docs；產出的字串貼進 data-fx-eqdata）
+```
+
+**合成配樂參數**（給 `ambientPreset`）——若想仿某首 CC 曲的調性，可用 ffmpeg + numpy 對該曲做 chroma／onset 分析抽出 bpm、和弦、旋律骨架。這只是作曲前置，抽出來的是通用音樂參數。
+
 ## 本地開發
 
 ```bash
