@@ -51,13 +51,39 @@ ln -s ~/mycelium/skills/mycelium ~/.claude/skills/mycelium
 作品設定寫在 `~/.config/mycelium/works.json`，一部作品一個 repo，可以有很多部。
 用法見 `skills/mycelium/SKILL.md`。
 
+## 敘事效果庫（`effects/`）
+
+連載小說時讓**頁面本身參與說故事**：讀者不是讀到世界在劣化，是他的畫面在劣化。
+零依賴、無 build，複製 `effects/mycelium-fx.js` 與 `effects/mycelium-fx.css` 兩個檔案就能用在任何部落格。
+
+寫文章時只標 `data-fx` 屬性：
+
+```html
+<section data-fx="eyelid">                    <!-- 睜眼：全黑一條縫，捲動後展開 -->
+<p data-fx="freeze" data-fx-ms="240">          <!-- 凍結：短暫吃掉捲動輸入 -->
+<div data-fx="drag" data-fx-factor="1.8">      <!-- 阻力：捲動變重（上限 3） -->
+<div data-fx="afterimage" data-fx-opacity=".035"><!-- 殘影：固定不動的內容複本 -->
+<p data-fx="scramble" data-fx-level="0.25">    <!-- 亂序：字序視覺打亂，DOM 仍是原文 -->
+<p data-fx="stutter" data-fx-times="3">        <!-- 重複：同段遞增重複 -->
+```
+
+`freeze` 是**上膛→擊發**：進入視窗只上膛，下一次捲動輸入才擊發，
+所以讀者停下來讀多久都不會把效果白白用掉。
+
+無障礙與韌性是硬性的：`prefers-reduced-motion: reduce` 全部關閉、
+鍵盤捲動與捲軸拖曳絕不攔截、關掉 JS 一樣讀得完整篇、
+`scramble` 的 DOM 永遠是正確原文、`[data-fx-toggle]` 是記在 localStorage 的全站關閉開關。
+
+示範頁（可即時拉滑桿調參數）：`npm run serve` 之後開
+<http://127.0.0.1:8919/effects/demo.html>。
+
 ## 本地開發
 
 ```bash
 npm install
 npx playwright install chromium
 npm run serve      # 另開一個 terminal，http://127.0.0.1:8919
-npm test           # 跑 Playwright 測試（65 個）
+npm test           # 跑 Playwright 測試（87 個）
 npm run test:skill # 跑 agent skill 的腳本測試（不需要瀏覽器）
 ```
 
