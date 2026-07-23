@@ -1,14 +1,10 @@
 'use strict';
 import { getAllRecords, putRecord, deleteRecord } from './db.js';
 import { esc } from './util.js';
+import { FORESHADOW_STATUSES, isForeshadowOverdue as isOverdue } from './records.js';
 
-const STATUSES = ['埋設中', '已回收', '棄用'];
-
-function isOverdue(item, chapterById) {
-  if (item.status !== '埋設中' || !item.recoverChapterId) return false;
-  const recoverChapter = chapterById[item.recoverChapterId];
-  return !!recoverChapter && recoverChapter.status === '完稿';
-}
+// 狀態列舉與逾期判斷都在 records.js，網頁與 skill 共用同一份規則。
+const STATUSES = FORESHADOW_STATUSES;
 
 // A relation whose source/target entity is missing degrades to "（已刪除）",
 // the exact same string graph.js's relation-list row falls back to (see

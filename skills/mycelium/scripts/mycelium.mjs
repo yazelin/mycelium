@@ -9,10 +9,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatContext } from '../../../ai-context.js';
 import { EXTRACT_SYSTEM, buildExtractUserMessage, formatKnownEntities } from '../../../extract-prompt.js';
+import { isForeshadowOverdue as isOverdue, sortChapters } from '../../../records.js';
 import { applyCandidates, assertValidProjectData, buildProposal, validateCandidates } from './candidates.mjs';
 import {
-  CONFIG_PATH, cacheDir, ghGetRaw, ghPutFile, pullData, readCachedData,
-  readConfig, resolveRepo, timestamp, writeData, writeSnapshot,
+  RECORD_TYPES, addRecord, describeRecord, diffData, editRecord, isEmptyDiff, planRemoval, removeRecord,
+} from './edits.mjs';
+import {
+  CONFIG_PATH, cacheDir, ghGetRaw, ghPutFile, localSnapshots, pullData, readCachedData,
+  readConfig, readSnapshot, remoteSnapshots, resolveRepo, timestamp, writeData, writeSnapshot,
 } from './repo.mjs';
 
 const USAGE = `mycelium skill —— 小說設定的終端機介面
@@ -38,14 +42,46 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
   extract-prompt --text <章節檔>       印出 system + user 兩段提示詞
   extract-prompt --text <章節檔> --json 以 JSON 印出（好餵給 API）
 
+改資料（edit / add / rm 預設就直接寫，每次寫入前一定先快照）：
+  edit entity <名字|id> [--rename ...] [--type ...] [--notes ...]
+                        [--add-alias ...] [--rm-alias ...] [--add-tag ...] [--rm-tag ...]
+                        [--field 欄位=值] [--rm-field 欄位]
+  edit chapter <標題|id> [--status 未寫|草稿|完稿] [--title ...] [--summary ...]
+                         [--wordcount N] [--volume N] [--order N] [--content-file <檔>]
+  edit foreshadow <標題|id> [--status 埋設中|已回收|棄用] [--title ...] [--notes ...]
+                            [--plant <章節>] [--recover <章節>] [--plant none]
+                            [--link-entity ...] [--unlink-entity ...]
+                            [--link-relation <id>] [--unlink-relation <id>]
+  edit relation <id|來源>目標> [--type ...] [--notes ...]
+
+  add entity <名字> [--type ...] [--notes ...] [--aliases a,b] [--tags a,b] [--field 欄位=值]
+  add chapter --title ... [--volume N] [--status ...] [--wordcount N] [--summary ...] [--content-file <檔>]
+  add foreshadow --title ... [--plant <章節>] [--recover <章節>] [--status ...] [--notes ...]
+                 [--link-entity ...] [--link-relation <id>]
+  add relation --source <角色> --target <角色> --type ... [--notes ...]
+
+  rm entity|chapter|foreshadow|relation <名字|id>
+                        刪掉一筆。刪 entity 會照網頁的規則連帶刪掉相關關係，
+                        動手前會先把要刪的東西全部印出來。
+
+  以上都可以加 --dry-run：只算給你看，不寫任何東西。
+  重複的選項可以給多次，例如 --add-alias 白衣客 --add-alias 落雨劍客。
+
+反悔（讓直接寫入變便宜）：
+  snapshots                   列出快照（時間、各 store 筆數）
+  restore <timestamp>         還原到某個快照（還原前也會先存一份現況快照）
+  diff [<timestamp>]          現況跟快照差在哪（省略時比最近一份）
+
 寫（預設只寫提案）：
   validate <候選檔.json>                驗證候選格式，不寫任何東西
   propose <候選檔.json> [--source ...] [--note ...] [--dry-run]
                                        寫成 repo 的 proposals/<timestamp>.json
   snapshot                             把現在的 data/*.json 存一份快照
-  apply <候選檔.json> [--chapters <章節檔.json>] --yes
-                                       直接改 data/*.json（使用者明講才可以用；
+  apply <候選檔.json> [--chapters <章節檔.json>] [--update-existing] --yes
+                                       直接改 data/*.json（批量套用抽取候選；
                                        一定會先自動快照）
+                                       --update-existing：候選名字已存在時，
+                                       改成更新既有那一筆（保留 id），而不是略過
 
 候選檔格式跟 app 的 AI 抽取結果完全相同：
   {"entities":[{"name":"黑袍人","aliasOf":"城主","type":null,"notes":"","reason":"本章揭露城主就是黑袍人"}],
@@ -60,8 +96,14 @@ function parseArgs(argv) {
     if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next === undefined || next.startsWith('--')) opts[key] = true;
-      else { opts[key] = next; i++; }
+      let value;
+      if (next === undefined || next.startsWith('--')) value = true;
+      else { value = next; i++; }
+      // 同一個選項給第二次就變成陣列（--add-alias 白衣客 --add-alias 落雨劍客），
+      // 之前是後面蓋掉前面，會靜默丟掉使用者輸入的東西。
+      if (Object.prototype.hasOwnProperty.call(opts, key)) {
+        opts[key] = Array.isArray(opts[key]) ? [...opts[key], value] : [opts[key], value];
+      } else opts[key] = value;
     } else opts._.push(a);
   }
   return opts;
@@ -92,11 +134,85 @@ function readJsonFile(path) {
   }
 }
 
-function isOverdue(item, chapterById) {
-  // 跟 foreshadow.js 同一條判斷：還在埋設中、有指定回收章、而那章已經完稿。
-  if (item.status !== '埋設中' || !item.recoverChapterId) return false;
-  const ch = chapterById[item.recoverChapterId];
-  return !!ch && ch.status === '完稿';
+
+// 寫入後，使用者瀏覽器裡的那份 IndexedDB 就過期了。這段警告每次寫入都要印，
+// 因為新分工下（對話是主要工作面、網頁是參考面）這是最容易毀掉資料的一步：
+// 從過期的瀏覽器按「同步到 GitHub」，會把剛剛在對話裡改的東西整份蓋掉。
+function printStaleWarning() {
+  console.log('');
+  console.log('⚠ 瀏覽器裡那一份現在是舊的：');
+  console.log('  1. 下次開網頁，第一件事是按「從 GitHub 匯入」。');
+  console.log('  2. 在匯入之前，絕對不要按「同步到 GitHub」——那會用舊資料蓋掉剛剛的修改。');
+  console.log('  3. 如果瀏覽器裡還有沒同步過的修改，先講一聲，我們比對過再決定要留哪一份。');
+}
+
+function specFromOpts(opts, map) {
+  const spec = {};
+  for (const [flag, key] of Object.entries(map)) {
+    if (opts[flag] !== undefined) spec[key] = opts[flag];
+  }
+  return spec;
+}
+
+function readContentFile(opts) {
+  const path = opts['content-file'];
+  if (path === undefined) return undefined;
+  if (path === true) die('--content-file 要給檔案路徑。');
+  if (Array.isArray(path)) die('--content-file 只能給一個檔案。');
+  if (!existsSync(path)) die(`找不到正文檔：${path}`);
+  return readFileSync(path, 'utf8');
+}
+
+function requireType(raw) {
+  const type = String(raw || '').replace(/ies$/, 'y').replace(/s$/, '');
+  const norm = { entity: 'entity', chapter: 'chapter', foreshadow: 'foreshadow', relation: 'relation' }[type];
+  if (!norm) die(`類型要是 ${RECORD_TYPES.join(' / ')} 其中之一，收到「${raw}」。`);
+  return norm;
+}
+
+/**
+ * 所有直接寫入都走這一條：先算（算不出來就整個中止，一個字都沒動）→ 先快照
+ * → 才寫 → 印出快照位置與還原指令 → 印過期警告。
+ *
+ * 順序是刻意的：驗證在快照之前，所以打錯字不會留一堆垃圾快照；快照在寫入之
+ * 前，所以快照裡永遠是「改動之前」的狀態。
+ */
+function mutate(opts, message, fn) {
+  const repo = resolveRepo(opts);
+  const { data } = pullData(repo);
+  let result;
+  try { result = fn(data); } catch (e) { die(e.message); }
+  assertValidProjectData(result.data);
+  if (opts['dry-run']) {
+    for (const line of result.log) console.log(line);
+    console.log('\n（dry-run：什麼都沒有寫。拿掉 --dry-run 才會真的改。）');
+    return;
+  }
+  const snap = writeSnapshot(repo, data);
+  writeData(repo, result.data, `${message} ${snap.ts}`);
+  for (const line of result.log) console.log(line);
+  console.log(`\n已寫入 ${repo.slug} 的 data/*.json。`);
+  console.log(`寫入前的快照：${repo.slug} 的 ${snap.remoteDir}（本機：${snap.localDir}）`);
+  console.log(`要反悔：node scripts/mycelium.mjs restore ${snap.ts}`);
+  printStaleWarning();
+}
+
+function printDiff(diff) {
+  const label = { entities: '角色', relations: '關係', chapters: '章節', foreshadow: '伏筆', chatlogs: '對話紀錄' };
+  const short = (v) => {
+    const s = typeof v === 'string' ? v : JSON.stringify(v === undefined ? null : v);
+    return s.length > 60 ? s.slice(0, 60) + '…' : s;
+  };
+  for (const [store, d] of Object.entries(diff)) {
+    if (!d.added.length && !d.removed.length && !d.changed.length) continue;
+    console.log(`${label[store] || store}：新增 ${d.added.length}、刪除 ${d.removed.length}、修改 ${d.changed.length}`);
+    for (const r of d.added) console.log(`  + ${r.name || r.title || r.type || r.id}（id ${r.id}）`);
+    for (const r of d.removed) console.log(`  - ${r.name || r.title || r.type || r.id}（id ${r.id}）`);
+    for (const c of d.changed) {
+      console.log(`  ~ ${c.record.name || c.record.title || c.record.type || c.id}（id ${c.id}）`);
+      for (const f of c.fields) console.log(`      ${f.key}：${short(f.from)} → ${short(f.to)}`);
+    }
+  }
 }
 
 const commands = {
@@ -184,7 +300,7 @@ const commands = {
 
   chapters(opts) {
     const { data } = loadData(opts);
-    const sorted = data.chapters.slice().sort((a, b) => (a.volume - b.volume) || (a.order - b.order));
+    const sorted = sortChapters(data.chapters);
     if (!sorted.length) { console.log('還沒有任何章節。'); return; }
     let total = 0;
     for (const c of sorted) {
@@ -268,6 +384,124 @@ const commands = {
     console.log(`本機另存一份：${snap.localDir}`);
   },
 
+
+  edit(opts) {
+    const type = requireType(opts._[0]);
+    const ref = opts._[1];
+    if (!ref) die(`要指定改哪一筆，例如：edit ${type} 林小雨 --notes "…"`);
+    const content = readContentFile(opts);
+    const maps = {
+      entity: { rename: 'rename', type: 'type', notes: 'notes', 'add-alias': 'addAlias', 'rm-alias': 'rmAlias', 'add-tag': 'addTag', 'rm-tag': 'rmTag', field: 'field', 'rm-field': 'rmField' },
+      chapter: { status: 'status', title: 'title', summary: 'summary', wordcount: 'wordCount', volume: 'volume', order: 'order' },
+      foreshadow: { status: 'status', title: 'title', notes: 'notes', plant: 'plant', recover: 'recover', 'link-entity': 'linkEntity', 'unlink-entity': 'unlinkEntity', 'link-relation': 'linkRelation', 'unlink-relation': 'unlinkRelation' },
+      relation: { type: 'type', notes: 'notes' },
+    };
+    const spec = specFromOpts(opts, maps[type]);
+    if (content !== undefined) {
+      if (type !== 'chapter') die('--content-file 只用在 edit chapter。');
+      spec.content = content;
+    }
+    mutate(opts, `agent edit ${type}`, (data) => editRecord(data, type, ref, spec));
+  },
+
+  add(opts) {
+    const type = requireType(opts._[0]);
+    const content = readContentFile(opts);
+    const maps = {
+      entity: { type: 'type', notes: 'notes', aliases: 'aliases', tags: 'tags', field: 'field' },
+      chapter: { title: 'title', volume: 'volume', status: 'status', wordcount: 'wordCount', summary: 'summary', order: 'order' },
+      foreshadow: { title: 'title', notes: 'notes', status: 'status', plant: 'plant', recover: 'recover', 'link-entity': 'linkEntity', 'link-relation': 'linkRelation' },
+      relation: { source: 'source', target: 'target', type: 'type', notes: 'notes' },
+    };
+    const spec = specFromOpts(opts, maps[type]);
+    // 位置參數也收：add entity 城主 等同 add entity --name 城主。
+    if (type === 'entity') spec.name = opts.name !== undefined ? opts.name : opts._[1];
+    if ((type === 'chapter' || type === 'foreshadow') && spec.title === undefined) spec.title = opts._[1];
+    if (type === 'entity' && spec.aliases !== undefined && typeof spec.aliases === 'string') {
+      spec.aliases = spec.aliases.split(',');
+    }
+    if (type === 'entity' && spec.tags !== undefined && typeof spec.tags === 'string') {
+      spec.tags = spec.tags.split(',');
+    }
+    if (content !== undefined) {
+      if (type !== 'chapter') die('--content-file 只用在 add chapter。');
+      spec.content = content;
+    }
+    mutate(opts, `agent add ${type}`, (data) => addRecord(data, type, spec));
+  },
+
+  rm(opts) {
+    const type = requireType(opts._[0]);
+    const ref = opts._[1];
+    if (!ref) die(`要指定刪哪一筆，例如：rm ${type} 城主`);
+    const repo = resolveRepo(opts);
+    const { data } = pullData(repo);
+    // 先把「會被刪掉什麼」整份印出來再動手——刪 entity 會連帶帶走關係，
+    // 使用者有權在事前看到完整清單，而不是事後才發現關係圖少了幾條線。
+    let plan;
+    try { plan = planRemoval(data, type, ref); } catch (e) { die(e.message); }
+    console.log(`將刪除：${describeRecord(data, type, plan.record)}（id ${plan.record.id}）`);
+    for (const c of plan.cascade) {
+      console.log(`連帶刪除 ${c.records.length} 筆關係：`);
+      for (const r of c.records) console.log(`  - ${describeRecord(data, 'relation', r)}（id ${r.id}）`);
+    }
+    for (const w of plan.warn) console.log(`注意：${w}`);
+    console.log('');
+    mutate(opts, `agent rm ${type}`, (d) => removeRecord(d, type, ref));
+  },
+
+  snapshots(opts) {
+    const repo = resolveRepo(opts);
+    const local = new Set(localSnapshots(repo));
+    const remote = opts.cached ? [] : remoteSnapshots(repo);
+    const all = Array.from(new Set([...local, ...remote])).sort();
+    if (!all.length) { console.log('還沒有任何快照。跑一次 snapshot 就會有第一份。'); return; }
+    for (const ts of all) {
+      const where = [local.has(ts) ? '本機' : null, remote.includes(ts) ? 'repo' : null].filter(Boolean).join('＋');
+      let counts = '';
+      if (local.has(ts)) {
+        const snap = readSnapshot(repo, ts);
+        counts = Object.entries(snap.data).map(([store, arr]) => `${store} ${arr.length}`).join('、');
+      } else {
+        counts = '（本機沒有快取，需要時 restore/diff 會自動從 repo 抓）';
+      }
+      console.log(`- ${ts}［${where}］${counts}`);
+    }
+    console.log('\n還原：node scripts/mycelium.mjs restore <timestamp>');
+  },
+
+  restore(opts) {
+    const ts = opts._[0];
+    if (!ts) die('要指定快照時間戳：restore 20260722-101530（可先跑 snapshots 看清單）');
+    const repo = resolveRepo(opts);
+    const snap = readSnapshot(repo, ts);
+    if (!snap) die(`找不到快照 ${ts}。跑 snapshots 看有哪些。`);
+    try { assertValidProjectData(snap.data); } catch (e) { die(`快照 ${ts} 的內容不合法：${e.message}`); }
+    mutate(opts, `agent restore ${ts}`, (data) => {
+      const diff = diffData(data, snap.data);
+      const log = [`從 ${snap.from} 還原到 ${ts}。`];
+      if (isEmptyDiff(diff)) log.push('（現況跟這份快照一模一樣，等於沒變。）');
+      return { data: snap.data, log };
+    });
+  },
+
+  diff(opts) {
+    const repo = resolveRepo(opts);
+    const local = localSnapshots(repo);
+    const remote = opts.cached ? [] : remoteSnapshots(repo);
+    const all = Array.from(new Set([...local, ...remote])).sort();
+    const ts = opts._[0] || all[all.length - 1];
+    if (!ts) die('還沒有任何快照可以比。先跑一次 snapshot。');
+    const snap = readSnapshot(repo, ts);
+    if (!snap) die(`找不到快照 ${ts}。跑 snapshots 看有哪些。`);
+    const { data } = opts.cached ? { data: readCachedData(repo) } : pullData(repo);
+    if (!data) die('本機還沒有快取，先跑一次 pull。');
+    const diff = diffData(snap.data, data);
+    console.log(`比對基準：快照 ${ts}（${snap.from}）→ 現況`);
+    if (isEmptyDiff(diff)) { console.log('沒有任何差異。'); return; }
+    printDiff(diff);
+  },
+
   apply(opts) {
     const path = opts._[0];
     if (!path) die('要給候選檔：apply candidates.json --yes');
@@ -287,7 +521,7 @@ const commands = {
     console.log(`已先快照：${repo.slug} 的 ${snap.remoteDir}（本機：${snap.localDir}）`);
 
     let result;
-    try { result = applyCandidates(data, raw, { chapters }); } catch (e) { die(e.message); }
+    try { result = applyCandidates(data, raw, { chapters, updateExisting: !!opts['update-existing'] }); } catch (e) { die(e.message); }
     assertValidProjectData(result.data);
     writeData(repo, result.data, `agent apply ${snap.ts}`);
     for (const line of result.log) console.log('  ' + line);

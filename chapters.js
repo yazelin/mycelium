@@ -1,12 +1,14 @@
 'use strict';
 import { getAllRecords, putRecord, deleteRecord } from './db.js';
 import { esc } from './util.js';
+import { CHAPTER_STATUSES, sortChapters } from './records.js';
 
-export const CHAPTER_STATUSES = ['未寫', '草稿', '完稿'];
+// 狀態列舉的單一事實來源在 records.js（skill 也 import 同一份）；這裡 re-export
+// 是為了不動到既有 import 這支檔案的地方。
+export { CHAPTER_STATUSES };
 
 export async function renderChaptersTab(projectId, container) {
-  const chapters = await getAllRecords(projectId, 'chapters');
-  chapters.sort((a, b) => (a.volume - b.volume) || (a.order - b.order));
+  const chapters = sortChapters(await getAllRecords(projectId, 'chapters'));
   const counts = CHAPTER_STATUSES.reduce((acc, s) => ({ ...acc, [s]: chapters.filter((c) => c.status === s).length }), {});
 
   container.innerHTML = `

@@ -1,6 +1,7 @@
 'use strict';
 import { getAllRecords, putRecord, deleteRecord } from './db.js';
 import { esc } from './util.js';
+import { relationsAffectedByEntityDelete } from './records.js';
 
 function splitList(value) {
   return value.split(',').map((s) => s.trim()).filter(Boolean);
@@ -93,7 +94,7 @@ export async function renderEntitiesTab(projectId, container) {
       // up front — this makes the delete silently take relations with it
       // otherwise.
       const relations = await getAllRecords(projectId, 'relations');
-      const affected = relations.filter((r) => r.sourceId === id || r.targetId === id);
+      const affected = relationsAffectedByEntityDelete(relations, id);
       if (affected.length && !confirm(`這個設定牽涉 ${affected.length} 筆關係，刪除後這些關係也會一併刪除，確定刪除？`)) return;
       await deleteRecord(projectId, 'entities', id);
       for (const r of affected) await deleteRecord(projectId, 'relations', r.id);

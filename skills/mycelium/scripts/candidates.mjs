@@ -99,14 +99,33 @@ export function applyCandidates(data, candidates, options = {}) {
   for (const store of PROJECT_STORES) next[store] = (data[store] || []).map((r) => ({ ...r }));
   const log = [];
 
+  // 名字查表要**同時收本名與別名**（#29）：候選送進來的名字若已經是某個角色的
+  // 別名，那也是既有角色，不可以再建一個分身——這個工具存在的理由就是同一個
+  // 角色不能被記成兩個。
   const nameToEntity = {};
-  for (const e of next.entities) nameToEntity[e.name] = e;
+  for (const e of next.entities) {
+    nameToEntity[e.name] = e;
+    for (const a of (e.aliases || [])) if (!nameToEntity[a]) nameToEntity[a] = e;
+  }
 
   // 第一趟：全新角色
   for (const cand of c.entities) {
     if (cand.aliasOf) continue;
-    if (nameToEntity[cand.name]) {
-      log.push(`略過角色「${cand.name}」：設定庫已有同名。`);
+    const existing = nameToEntity[cand.name];
+    if (existing) {
+      // 預設略過（不重複建立）。使用者明講要用候選補既有角色的設定時，走
+      // `--update-existing`：跟網頁就地編輯同一條 `{ ...existing, 欄位 }` 路徑，
+      // **保留 id**，所以既有的關係與伏筆連結都不會斷。
+      if (options.updateExisting && (isNonEmptyString(cand.notes) || isNonEmptyString(cand.type))) {
+        const changed = [];
+        if (isNonEmptyString(cand.type) && cand.type !== existing.type) { existing.type = cand.type; changed.push('類型'); }
+        if (isNonEmptyString(cand.notes) && cand.notes !== existing.notes) { existing.notes = cand.notes; changed.push('設定內容'); }
+        log.push(changed.length
+          ? `更新既有角色「${existing.name}」的${changed.join('與')}（保留原 id ${existing.id}）。`
+          : `角色「${existing.name}」已存在且內容相同，未變更。`);
+      } else {
+        log.push(`略過角色「${cand.name}」：設定庫已有${existing.name === cand.name ? '同名角色' : `同名別名（屬於「${existing.name}」）`}，未重複建立。`);
+      }
       continue;
     }
     const created = {
