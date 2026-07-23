@@ -133,7 +133,7 @@ test('edit entity 用別名也找得到本尊', () => {
 
 // ── 新增 ────────────────────────────────────────────────────────────────
 
-test('add 出來的紀錄欄位跟網頁表單一致，且通過匯入器驗證', () => {
+test('add 出來的紀錄欄位齊全，且通過整份驗證', () => {
   let data = addEntity(fixture(), { name: '白衣客', type: '人物', notes: '雨夜裡的陌生人', aliases: ['執傘人'] }).data;
   const created = data.entities.find((e) => e.name === '白衣客');
   assert.deepEqual(created.aliases, ['執傘人']);
@@ -163,7 +163,7 @@ test('add relation 找不到角色就擋下來，不產生斷掉的關係', () =
 
 // ── 刪除與連帶 ──────────────────────────────────────────────────────────
 
-test('刪 entity 連帶刪掉所有相關關係（跟網頁同一條規則）', () => {
+test('刪 entity 連帶刪掉所有相關關係', () => {
   const before = fixture();
   const plan = planRemoval(before, 'entity', '城主');
   assert.deepEqual(plan.cascade[0].records.map((r) => r.id).sort(), ['r1', 'r3']);
@@ -185,7 +185,7 @@ test('刪章節會提醒正文與指向它的伏筆，但不動其他 store', ()
   assert.ok(plan.warn.some((w) => w.includes('正文')));
   const { data } = removeRecord(fixture(), 'chapter', '雨夜');
   assert.equal(data.chapters.length, 1);
-  assert.equal(data.foreshadow.length, 1, '伏筆不會被連帶刪掉，跟網頁一致');
+  assert.equal(data.foreshadow.length, 1, '伏筆不會被連帶刪掉');
 });
 
 test('刪關係只刪那一筆', () => {

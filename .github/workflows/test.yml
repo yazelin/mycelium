@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  # skill 是現在的主產品，它的測試不需要瀏覽器，所以獨立成一個很快的 job。
+  skill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm run test:skill
+
+  # 剩下的瀏覽器測試只剩敘事效果庫（effects/）。
   playwright:
     runs-on: ubuntu-latest
     steps:

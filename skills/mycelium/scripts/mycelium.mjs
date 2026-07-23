@@ -6,10 +6,11 @@
 // 這支腳本不需要 agent 在旁邊也能跑：每個子指令都是自己讀輸入、印人看得懂的
 // 輸出。LLM 負責的是「判斷」（一致性、別名、發想），機械的部分全在這裡。
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { formatContext } from '../../../ai-context.js';
-import { EXTRACT_SYSTEM, buildExtractUserMessage, formatKnownEntities } from '../../../extract-prompt.js';
-import { isForeshadowOverdue as isOverdue, sortChapters } from '../../../records.js';
+import { join, resolve } from 'node:path';
+import { formatContext } from './context.mjs';
+import { buildGraphHtml, buildGraphModel, gitTreeWithRemote } from './graph.mjs';
+import { EXTRACT_SYSTEM, buildExtractUserMessage, formatKnownEntities } from './extract-prompt.mjs';
+import { isForeshadowOverdue as isOverdue, sortChapters } from './records.mjs';
 import { applyCandidates, assertValidProjectData, buildProposal, validateCandidates } from './candidates.mjs';
 import {
   RECORD_TYPES, addRecord, describeRecord, diffData, editRecord, isEmptyDiff, planRemoval, removeRecord,
@@ -31,12 +32,14 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
 讀（不會寫任何東西）：
   works                       列出設定檔裡的作品
   pull                        從 repo 抓 data/*.json 到本機快取，印各 store 筆數
-  context                     印出跟網頁 AI 一模一樣的設定 context 區塊
+  context                     印出整部作品壓成一段的設定 context（討論劇情時先餵這個）
   entity <名字>                單一角色的完整設定（含別名、關係、相關伏筆）
   foreshadow [--open]         伏筆清單；--open 只列未回收（含逾期標記）
   chapters                    卷/章清單與狀態
   known                       既有角色名單（抽取提示詞用的那一份）
   proposals                   列出 repo 裡現有的提案檔
+  graph [--out <檔案.html>]    匯出可離線開的人物關係圖 HTML（點兩下就能看）
+                              預設寫到本機快取；不准寫進有 remote 的 git 目錄
 
 抽章節（LLM 由你自己的 agent 跑）：
   extract-prompt --text <章節檔>       印出 system + user 兩段提示詞
@@ -61,7 +64,7 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
   add relation --source <角色> --target <角色> --type ... [--notes ...]
 
   rm entity|chapter|foreshadow|relation <名字|id>
-                        刪掉一筆。刪 entity 會照網頁的規則連帶刪掉相關關係，
+                        刪掉一筆。刪 entity 會連帶刪掉它身上所有關係，
                         動手前會先把要刪的東西全部印出來。
 
   以上都可以加 --dry-run：只算給你看，不寫任何東西。
@@ -83,7 +86,7 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
                                        --update-existing：候選名字已存在時，
                                        改成更新既有那一筆（保留 id），而不是略過
 
-候選檔格式跟 app 的 AI 抽取結果完全相同：
+候選檔格式（LLM 抽章節之後回傳的那一份）：
   {"entities":[{"name":"黑袍人","aliasOf":"城主","type":null,"notes":"","reason":"本章揭露城主就是黑袍人"}],
    "relations":[{"source":"林小雨","target":"城主","type":"追殺","reason":"城主軍全境追殺林小雨"}],
    "foreshadow":[{"title":"林小雨的真實身份","notes":"","reason":"城主的台詞埋了伏筆"}]}
@@ -135,16 +138,6 @@ function readJsonFile(path) {
 }
 
 
-// 寫入後，使用者瀏覽器裡的那份 IndexedDB 就過期了。這段警告每次寫入都要印，
-// 因為新分工下（對話是主要工作面、網頁是參考面）這是最容易毀掉資料的一步：
-// 從過期的瀏覽器按「同步到 GitHub」，會把剛剛在對話裡改的東西整份蓋掉。
-function printStaleWarning() {
-  console.log('');
-  console.log('⚠ 瀏覽器裡那一份現在是舊的：');
-  console.log('  1. 下次開網頁，第一件事是按「從 GitHub 匯入」。');
-  console.log('  2. 在匯入之前，絕對不要按「同步到 GitHub」——那會用舊資料蓋掉剛剛的修改。');
-  console.log('  3. 如果瀏覽器裡還有沒同步過的修改，先講一聲，我們比對過再決定要留哪一份。');
-}
 
 function specFromOpts(opts, map) {
   const spec = {};
@@ -194,7 +187,6 @@ function mutate(opts, message, fn) {
   console.log(`\n已寫入 ${repo.slug} 的 data/*.json。`);
   console.log(`寫入前的快照：${repo.slug} 的 ${snap.remoteDir}（本機：${snap.localDir}）`);
   console.log(`要反悔：node scripts/mycelium.mjs restore ${snap.ts}`);
-  printStaleWarning();
 }
 
 function printDiff(diff) {
@@ -310,6 +302,41 @@ const commands = {
     console.log(`共 ${sorted.length} 章、${total} 字。`);
   },
 
+  /**
+   * 匯出關係圖。這是網頁收掉之後（#34）唯一保留下來的視覺面：
+   * 空間佈局是對話給不了的東西，其餘（瀏覽、編輯、備份、提案）對話都做得比較快。
+   *
+   * 產出是一個自帶樣式與 cytoscape 的單一 HTML，點兩下就開，不連網、不需要伺服器。
+   * 預設寫到本機快取目錄而不是工作目錄：裡面是整部作品的真實設定，
+   * 不應該一個手滑就躺進某個 git repo 裡。
+   */
+  graph(opts) {
+    const { repo, data } = loadData(opts);
+    const model = buildGraphModel(data);
+    if (!model.nodes.length) die('設定庫裡還沒有角色，畫不出關係圖。');
+    const outOpt = opts.out;
+    if (outOpt === true) die('--out 要給檔案路徑。');
+    if (Array.isArray(outOpt)) die('--out 只能給一個路徑。');
+    const dir = join(cacheDir(repo), 'graph');
+    // 副檔名固定是 .graph.html，跟本 repo .gitignore 的 `*.graph.html` 對得起來。
+    const out = outOpt ? resolve(String(outOpt)) : join(dir, `${repo.name}.graph.html`);
+    const outDir = join(out, '..');
+    mkdirSync(outDir, { recursive: true });
+    const tracked = opts.force ? null : gitTreeWithRemote(outDir);
+    if (tracked) {
+      die(`${outDir}\n     在一個有 remote 的 git 工作目錄裡（${tracked}）。\n`
+        + '     這份 HTML 帶著整部作品的設定與伏筆，推上去就是公開。\n'
+        + '     真的要寫在這裡就加 --force，並自己確認它有被 .gitignore 蓋到。');
+    }
+    const generatedAt = new Date().toLocaleString('zh-TW', { hour12: false });
+    writeFileSync(out, buildGraphHtml({ model, title: repo.name, generatedAt }), 'utf8');
+    const dangling = (data.relations || []).length - model.edges.length;
+    console.log(`關係圖：角色 ${model.nodes.length}、關係 ${model.edges.length}。`);
+    if (dangling > 0) console.log(`（略過 ${dangling} 筆端點已不存在的關係——它們會讓整張圖畫不出來。）`);
+    console.log(out);
+    console.log('點兩下就能開，不需要網路，也不需要跑伺服器。');
+  },
+
   proposals(opts) {
     const repo = resolveRepo(opts);
     const raw = ghGetRaw(repo, 'proposals');
@@ -373,7 +400,7 @@ const commands = {
     ghPutFile(repo, `proposals/${ts}.json`, body, `proposal ${ts}`);
     console.log(`已寫入提案：${repo.slug} 的 proposals/${ts}.json`);
     console.log(`內容：角色 ${proposal.entities.length}、關係 ${proposal.relations.length}、伏筆 ${proposal.foreshadow.length}。`);
-    console.log('data/*.json 完全沒有動。請到網頁的提案畫面逐項確認後才會寫進設定庫。');
+    console.log('data/*.json 完全沒有動。逐項跟使用者確認過，再用 apply 寫進設定庫。');
   },
 
   snapshot(opts) {
@@ -507,7 +534,7 @@ const commands = {
     if (!path) die('要給候選檔：apply candidates.json --yes');
     if (!opts.yes) {
       die('apply 會直接改 data/*.json。只有使用者明講「直接寫」時才可以用，並要加 --yes。' +
-        '\n     預設請改用 propose——提案由使用者在網頁上逐項確認。');
+        '\n     預設請改用 propose——先寫成提案，逐項跟使用者確認過再套用。');
     }
     const raw = readJsonFile(path);
     const chapters = opts.chapters ? readJsonFile(opts.chapters) : [];
@@ -515,8 +542,8 @@ const commands = {
     const repo = resolveRepo(opts);
     const { data } = pullData(repo);
 
-    // 快照永遠先做，而且做在任何寫入之前——瀏覽器那份 IndexedDB 才是主本，
-    // 一旦這裡蓋錯，使用者之後「從 GitHub 匯入」就會把自己的稿子洗掉。
+    // 快照永遠先做，而且做在任何寫入之前：repo 的 data/*.json 就是主本，
+    // 這裡蓋錯就是直接蓋掉使用者的稿子，沒有第二份可以救。
     const snap = writeSnapshot(repo, data);
     console.log(`已先快照：${repo.slug} 的 ${snap.remoteDir}（本機：${snap.localDir}）`);
 
@@ -526,7 +553,6 @@ const commands = {
     writeData(repo, result.data, `agent apply ${snap.ts}`);
     for (const line of result.log) console.log('  ' + line);
     console.log(`已直接寫入 ${repo.slug} 的 data/*.json。`);
-    console.log('提醒使用者：如果瀏覽器裡還有沒同步的修改，請先在網頁做一次「同步到 GitHub」再匯入，否則會互蓋。');
     console.log(`要還原就把 ${snap.remoteDir} 底下的檔案覆蓋回 data/。`);
   },
 };

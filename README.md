@@ -1,60 +1,68 @@
 # mycelium
 
-長篇小說 / IP 創作輔助工具。純前端、無 build 步驟，可直接發布在 GitHub Pages。
+一個 **agent skill** ＋ 一個 **敘事效果庫**。都是零依賴、沒有 build 步驟。
 
 菌絲網路連結整片森林裡的樹；mycelium 連結你多部作品各自的設定資料網。
 
-## 功能
+| | 是什麼 | 給誰 |
+|---|---|---|
+| [`skills/mycelium/`](skills/mycelium/SKILL.md) | 長篇小說的設定管理，全部在終端機對話裡完成 | 寫長篇的人 ＋ 他的 agent |
+| [`effects/`](https://yazelin.github.io/mycelium/) | 捲動驅動的敘事效果庫（`mycelium-fx`） | 在網頁上連載小說的人 |
 
-- **設定庫**：人物 / 地點 / 勢力 / 概念，每筆都帶「別名」欄位——身分反轉的劇情（某角色其實就是另一個角色）不會被記成兩個人
-- **關係圖**：可拖拉的人物關係節點圖（Cytoscape），關係可新增可刪除
-- **大綱**：卷 / 章結構、狀態與字數，進度一眼看完
-- **伏筆追蹤**：記錄埋設章節與預計回收章節，回收章都寫完了還沒回收會標示逾期
-- **AI 助理**：一致性檢查、劇情發想、從貼上的章節全文抽取設定候選、自由問答
-- **多作品**：每部作品各自獨立資料庫，可各自綁定一個你自己的 private GitHub repo 做雲端備份，也可匯出 / 匯入 JSON
+---
 
-AI 每個任務可以各自挑不同的 provider 與模型（llmshare / Groq / OpenAI / Gemini / OpenRouter / Ollama / 自訂 OpenAI 相容端點）。之後要加新任務（分鏡、劇本…）只要多一個下拉選項，資料結構不用動。
+## agent skill：小說設定的終端機介面
 
-AI 抽取出來的設定不會直接寫進資料庫——一律列成候選清單，你勾選確認後才寫入。
+給本機 agent（Claude Code / Codex / Gemini CLI…）用。在對話裡就能讀作品設定回答
+一致性問題、**直接改設定**（角色、章節狀態、伏筆、關係都能改／加／刪）、把新章節
+抽成設定候選（含別名合併判斷）、帶著全部設定討論劇情、批量匯入舊稿。
 
-## 資料放哪裡
+一部作品的資料就是**你自己的 private repo 裡的 `data/*.json`**——沒有伺服器、沒有
+資料庫、沒有第二份主本。存取走你本來就登入的 `gh`，不需要 PAT。
 
-- 作品資料存在瀏覽器的 IndexedDB，留在你自己的裝置上
-- API key 與 GitHub PAT 只存在 localStorage，不會進原始碼、不會進 git、不會送到設定的 provider 端點以外的任何地方
-- 雲端備份是你自己的 private repo，同步一律手動按鈕觸發，不會在背景偷跑
-
-## 終端機 agent skill
-
-`skills/mycelium/` 是給本機 agent（Claude Code / Codex / Gemini CLI…）用的 skill：
-在終端機就能讀作品設定回答一致性問題、**直接改設定**（角色、章節狀態、伏筆、關係
-都能改／加／刪）、把新章節抽成設定候選（含別名合併判斷）、帶著全部設定討論劇情、
-批量匯入舊稿。對話是主要工作面，網頁負責關係圖與瀏覽。
-
-agent 讀不到瀏覽器的 IndexedDB，接點是作品綁定的那個 private repo 的 `data/*.json`。
-
-- **`edit` / `add` / `rm` 直接寫**：你在對話裡說「改成這樣」就是確認，不用再開瀏覽器
+- **`edit` / `add` / `rm` 直接寫**：你在對話裡說「改成這樣」就是確認
 - **每次寫入前自動快照**到 `snapshots/<timestamp>/`（repo 與本機各一份），
   `snapshots` / `diff` / `restore` 讓反悔只要一行指令
 - **編輯一律保留紀錄 id**，所以關係與伏筆的連結不會斷
-- **批量抽取結果仍走提案**：寫成 `proposals/<timestamp>.json`，由你在網頁上逐項勾選
-- ⚠ **skill 改完之後，瀏覽器那一份就過期了**：下次開網頁要先按「從 GitHub 匯入」，
-  在那之前不要按「同步到 GitHub」（會用舊資料蓋掉 agent 的修改）
+- **別名是這個工具存在的理由**：身分反轉的劇情（某角色其實就是另一個角色）
+  不會被記成兩個人
 
-安裝（clone + symlink 兩行）：
+### `mycelium graph`：唯一的視覺面
+
+```bash
+node scripts/mycelium.mjs graph                 # 寫到本機快取，印出路徑
+node scripts/mycelium.mjs graph --out ~/桌面/關係.graph.html
+```
+
+產生一個**自帶樣式與 cytoscape 的單一 HTML**：點兩下就開，不連網、不用伺服器。
+節點大小＝牽連多寡、形狀與顏色＝類型，點一個角色就只留下他的糾纏並展開他的設定；
+圖例本身是類型篩選器，還沒牽上線的角色預設收起來。
+
+十幾條關係誰跟誰糾纏，用看的三秒，用講的三分鐘——這是對話唯一取代不了的東西，
+所以它留下來了，其餘的網頁介面在 2026-07 收掉了（見
+[設計文件末段](docs/superpowers/specs/2026-07-22-mycelium-design.md)）。
+
+⚠ **匯出的檔案裡是整部作品的設定與伏筆。** 預設寫在本機快取
+（`~/.cache/mycelium-skill/`），指令會**拒絕**寫進任何有 remote 的 git 工作目錄；
+本 repo 的 `.gitignore` 另外擋掉 `*.graph.html`。
+
+### 安裝
 
 ```bash
 git clone https://github.com/yazelin/mycelium ~/mycelium
 ln -s ~/mycelium/skills/mycelium ~/.claude/skills/mycelium
 ```
 
-需要 `node` 18+ 與已登入的 `gh`（不需要 PAT，也零 npm 依賴）。
-作品設定寫在 `~/.config/mycelium/works.json`，一部作品一個 repo，可以有很多部。
-用法見 `skills/mycelium/SKILL.md`。
+需要 `node` 18+ 與已登入的 `gh`，零 npm 依賴。作品設定寫在
+`~/.config/mycelium/works.json`，一部作品一個 repo，可以有很多部。
+完整用法見 [`skills/mycelium/SKILL.md`](skills/mycelium/SKILL.md)。
+
+---
 
 ## 敘事效果庫（`effects/`）
 
 連載小說時讓**頁面本身參與說故事**：讀者不是讀到世界在劣化，是他的畫面在劣化。
-零依賴、無 build，複製 `effects/mycelium-fx.js` 與 `effects/mycelium-fx.css` 兩個檔案就能用在任何部落格。
+複製 `effects/mycelium-fx.js` 與 `effects/mycelium-fx.css` 兩個檔案就能用在任何部落格。
 
 寫文章時只標 `data-fx` 屬性：
 
@@ -74,8 +82,8 @@ ln -s ~/mycelium/skills/mycelium ~/.claude/skills/mycelium
 鍵盤捲動與捲軸拖曳絕不攔截、關掉 JS 一樣讀得完整篇、
 `scramble` 的 DOM 永遠是正確原文、`[data-fx-toggle]` 是記在 localStorage 的全站關閉開關。
 
-示範頁（可即時拉滑桿調參數）：`npm run serve` 之後開
-<http://127.0.0.1:8919/effects/demo.html>。
+**示範頁（可即時拉滑桿調參數）：<https://yazelin.github.io/mycelium/>**
+手感這種東西看說明是判斷不出來的，要自己捲一次。
 
 ## 本地開發
 
@@ -83,13 +91,14 @@ ln -s ~/mycelium/skills/mycelium ~/.claude/skills/mycelium
 npm install
 npx playwright install chromium
 npm run serve      # 另開一個 terminal，http://127.0.0.1:8919
-npm test           # 跑 Playwright 測試（87 個）
-npm run test:skill # 跑 agent skill 的腳本測試（不需要瀏覽器）
+npm test           # Playwright：敘事效果庫的行為契約
+npm run test:skill # agent skill 的腳本測試（不需要瀏覽器）
 ```
 
 沒有 build 步驟，改完存檔重整就看得到。
 
-設計文件：`docs/superpowers/specs/2026-07-22-mycelium-design.md`
+設計文件：[`docs/superpowers/specs/2026-07-22-mycelium-design.md`](docs/superpowers/specs/2026-07-22-mycelium-design.md)
+——最後一段記錄了「網頁是主介面」這個原始前提怎麼被實際使用推翻。
 
 ## 作者
 
@@ -97,4 +106,4 @@ npm run test:skill # 跑 agent skill 的腳本測試（不需要瀏覽器）
 
 ## 授權
 
-MIT，見 LICENSE。
+MIT © 林亞澤，見 LICENSE。

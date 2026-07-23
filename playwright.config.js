@@ -11,7 +11,9 @@ export default defineConfig({
   },
   webServer: {
     command: 'python3 -m http.server 8919 --bind 127.0.0.1',
-    url: 'http://127.0.0.1:8919',
+    // 探測一個真的存在的檔案，不要探 `/`：網頁 app 收掉之後（#34）根目錄
+    // 已經沒有 index.html，`/` 只會是目錄列表或 404，不能拿來判斷起來了沒。
+    url: 'http://127.0.0.1:8919/effects/demo.html',
     reuseExistingServer: !process.env.CI,
   },
   projects: [{ name: 'desktop', use: { ...devices['Desktop Chrome'] } }],

@@ -1,3 +1,7 @@
 node_modules/
 test-results/
 playwright-report/
+
+# `mycelium graph` 匯出的關係圖：裡面是整部作品的設定與伏筆。
+# 預設寫在本機快取目錄，這條是 --out 手滑寫進 repo 時的第二道防線。
+*.graph.html
