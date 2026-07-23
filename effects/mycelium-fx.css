@@ -70,11 +70,20 @@
   overflow: visible;
 }
 
-/* 重複：回音段落。aria-hidden，只是視覺上的殘響。 */
+/* 重複：回音段落。aria-hidden，只是視覺上的殘響。
+   做成逐漸消退的樣子：縮小、變淡、往內縮、去彩度，讀者一看就知道是回聲不是重寫。
+   （只靠透明度區分時，回音跟原文幾乎一樣大一樣黑，會被誤讀成手誤的重複段落。） */
 .mfx-echo {
   pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
+  font-size: 0.9em;
+  color: #97a0a6;
+  transform: scale(0.965);
+  transform-origin: right center;
+  margin-top: -0.4em;
+  filter: blur(0.4px);
+  letter-spacing: 0.02em;
 }
 
 /* 阻力區域不需要任何樣式——它是行為不是外觀。 */
