@@ -113,6 +113,52 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     expect((await page.evaluate(() => window.scrollY)) - kbBefore).toBeGreaterThan(200);
   });
 
+  test('eyelid 的提示要等延遲過了才浮現，之前不會搶先出現（#37）', async ({ page }) => {
+    await page.goto(FIXTURE);
+    // fixture 把 eyelid-a 的 hint 延遲壓到 150ms，這裡故意在那之前檢查。
+    await page.waitForTimeout(60);
+    expect(await page.locator('.mfx-eyelid-hint--visible').count()).toBe(0);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('waiting');
+
+    // 過了 hint 延遲，但還沒到自動展開（400ms）。
+    await page.waitForTimeout(220); // 累計 ~280ms
+    expect(await page.locator('.mfx-eyelid-hint--visible').count()).toBe(1);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('hint');
+  });
+
+  test('eyelid 完全沒有輸入也會自己緩緩展開，不需要讀者做任何事（#37）', async ({ page }) => {
+    await page.goto(FIXTURE);
+    await page.waitForTimeout(430); // 過了自動展開延遲（400ms）
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('auto-open');
+    // 開始自動展開之後，提示就沒有必要再留著了。
+    expect(await page.locator('.mfx-eyelid-hint--visible').count()).toBe(0);
+    await expect(page.locator('.mfx-eyelid')).toHaveCount(1); // 展開中，還沒消失
+
+    await page.waitForTimeout(450); // 展開動畫（300ms）跑完
+    await expect(page.locator('.mfx-eyelid')).toHaveCount(0);
+    await expect(page.locator('.mfx-eyelid-hint')).toHaveCount(0);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('done');
+    // 自動展開只是視覺上開，不代表頁面真的被捲動過。
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  });
+
+  test('eyelid 一收到捲動輸入就立刻接管：提示與自動展開都取消，之後照讀者捲動的進度走（#37）', async ({ page }) => {
+    await page.goto(FIXTURE);
+    await page.waitForTimeout(280); // 提示已經浮現，但還沒到自動展開
+    expect(await page.locator('.mfx-eyelid-hint--visible').count()).toBe(1);
+
+    await page.mouse.wheel(0, 40); // 一點點捲動就要接管
+    await page.waitForTimeout(120);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('user-open');
+    expect(await page.locator('.mfx-eyelid-hint--visible').count()).toBe(0);
+
+    // 就算等過了原本自動展開該結束的時間，也不會被自動流程蓋掉——
+    // 全不全開完全照讀者捲動的距離算，這裡沒捲夠 openVh，黑幕仍在。
+    await page.waitForTimeout(700);
+    expect(await page.locator('#eyelid-a').getAttribute('data-fx-state')).toBe('user-open');
+    await expect(page.locator('.mfx-eyelid')).toHaveCount(1);
+  });
+
   test('scramble 只改視覺：DOM 文字仍然是原文', async ({ page }) => {
     await page.goto(FIXTURE);
     const original = '城主說完那句話之後屋子裡沒有人接話落雨劍客把杯子放回桌上';
@@ -179,6 +225,7 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     await expect(page.locator('.mfx-ghost')).toHaveCount(0);
     await expect(page.locator('.mfx-echo')).toHaveCount(0);
     await expect(page.locator('.mfx-eyelid')).toHaveCount(0);
+    await expect(page.locator('.mfx-eyelid-hint')).toHaveCount(0); // 提示與自動展開整段都不適用（#37）
     await expect(page.locator('.mfx-ch')).toHaveCount(0);
 
     // 沒有凍結、沒有阻力：捲動一路正常。

@@ -82,6 +82,12 @@ ln -s ~/mycelium/skills/mycelium ~/.claude/skills/mycelium
 鍵盤捲動與捲軸拖曳絕不攔截、關掉 JS 一樣讀得完整篇、
 `scramble` 的 DOM 永遠是正確原文、`[data-fx-toggle]` 是記在 localStorage 的全站關閉開關。
 
+**任何需要讀者主動輸入才會前進的效果，都必須同時有「提示」與「自動前進的保險」**——
+目前只有 `eyelid` 屬於這類（全黑一條縫，不捲就一直是黑的）：約 2.5 秒後浮出一個很淡的
+向下 chevron，約 7 秒後開始自己緩緩展開（呼吸速度，不是瞬間跳開），任何捲動輸入隨時
+接管、提示淡出。之後加新效果如果也需要讀者動作才會繼續，這條規則一樣適用（見
+`effects/mycelium-fx.js` 檔頭的硬性原則第 6 條）。
+
 **示範頁（可即時拉滑桿調參數）：<https://yazelin.github.io/mycelium/>**
 手感這種東西看說明是判斷不出來的，要自己捲一次。
 

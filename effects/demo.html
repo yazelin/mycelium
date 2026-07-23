@@ -271,7 +271,7 @@ footer.site a:hover{color:var(--ink);border-color:var(--ink)}
   <section class="fx" id="eyelid">
     <p class="eyebrow">&lt;section <b>data-fx="eyelid"</b> data-fx-slit="10" data-fx-open="70"&gt;</p>
     <h3>睜眼</h3>
-    <p class="desc">進場。全黑中留一條縫，捲動之後逐漸展開到全螢幕。進度是由捲動位置算的，不是計時也不是攔截，所以鍵盤捲動一樣打得開；黑幕 <code>pointer-events: none</code>，底下的字隨時可以選取。另外有保險：就算完全不捲，時間到也會全開，不會有人被關在黑幕裡。</p>
+    <p class="desc">進場。全黑中留一條縫，捲動之後逐漸展開到全螢幕。進度是由捲動位置算的，不是計時也不是攔截，所以鍵盤捲動一樣打得開；黑幕 <code>pointer-events: none</code>，底下的字隨時可以選取。讀者完全不動的話：約 2.5 秒後縫下方浮出一個很淡的向下 chevron，約 7 秒後開始自己緩緩展開（呼吸速度，不是瞬間跳開）——這不是妥協，眼睛本來就會自己睜開。任何時候一有捲動輸入就立刻接管，提示淡出，之後完全照捲動距離走。</p>
     <div class="knobs">
       <label class="knob">縫寬 vh
         <input type="range" min="0" max="40" step="1" value="10" id="k-slit">

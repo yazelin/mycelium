@@ -36,6 +36,30 @@
 .mfx-eyelid-top { top: 0; }
 .mfx-eyelid-bottom { bottom: 0; }
 
+/* 睜眼的提示：讀者完全不動時，縫下方浮出一個很淡的向下 chevron（#37）。
+   透明度刻意壓低——它只是個邀請，不能搶走那個畫面的質感。 */
+.mfx-eyelid-hint {
+  position: fixed;
+  left: 50%;
+  z-index: 41;
+  pointer-events: none;
+  color: #fff;
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 1.1s ease;
+}
+.mfx-eyelid-hint--visible { opacity: 0.32; }
+.mfx-eyelid-hint svg {
+  display: block;
+  width: 1.5rem;
+  height: 1.5rem;
+  animation: mfx-eyelid-hint-bob 1.8s ease-in-out infinite;
+}
+@keyframes mfx-eyelid-hint-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(0.35rem); }
+}
+
 /* 亂序：每個字包一層 span，位移只做視覺交換，DOM 文字仍是原文。 */
 .mfx-ch {
   display: inline-block;
@@ -59,7 +83,8 @@
    （JS 端也會整個不掛監聽，這裡是第二道保險。） */
 @media (prefers-reduced-motion: reduce) {
   .mfx-ghost,
-  .mfx-eyelid { display: none !important; }
+  .mfx-eyelid,
+  .mfx-eyelid-hint { display: none !important; }
   .mfx-echo { display: none !important; }
   .mfx-ch { transform: none !important; }
 }
@@ -67,5 +92,6 @@
 /* 全站關閉開關（localStorage）打開時同樣清乾淨。 */
 .mfx-off .mfx-ghost,
 .mfx-off .mfx-eyelid,
+.mfx-off .mfx-eyelid-hint,
 .mfx-off .mfx-echo { display: none !important; }
 .mfx-off .mfx-ch { transform: none !important; }
