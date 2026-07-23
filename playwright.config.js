@@ -16,10 +16,5 @@ export default defineConfig({
     url: 'http://127.0.0.1:8919/effects/demo.html',
     reuseExistingServer: !process.env.CI,
   },
-  projects: [{
-    name: 'desktop',
-    use: {
-      ...devices['Desktop Chrome'],
-    },
-  }],
+  projects: [{ name: 'desktop', use: { ...devices['Desktop Chrome'] } }],
 });
