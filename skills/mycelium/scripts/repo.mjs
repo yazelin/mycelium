@@ -1,7 +1,7 @@
 'use strict';
 // 作品 repo 的存取層：一律走 gh CLI（使用者已經登入過），不碰 PAT。
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PROJECT_STORES } from '../../../db.js';
@@ -170,6 +170,52 @@ export function writeSnapshot(repo, data, ts = timestamp()) {
     remote.push(path);
   }
   return { localDir, remoteDir: `snapshots/${ts}/`, remote, ts };
+}
+
+/** 本機快取裡有哪些快照（時間戳排序，新的在後）。 */
+export function localSnapshots(repo) {
+  const dir = join(cacheDir(repo), 'snapshots');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
+}
+
+/** repo 裡有哪些快照。repo 還沒有 snapshots/ 就回空陣列。 */
+export function remoteSnapshots(repo) {
+  const raw = ghGetRaw(repo, 'snapshots');
+  if (raw === null) return [];
+  let list;
+  try { list = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  return list.filter((f) => f.type === 'dir').map((f) => f.name).sort();
+}
+
+/**
+ * 讀某個快照的五個 store。先看本機快取（快、離線也行），沒有才去 repo 抓。
+ * 回傳 { data, from }；兩邊都沒有就回 null。
+ */
+export function readSnapshot(repo, ts) {
+  const dir = join(cacheDir(repo), 'snapshots', ts);
+  if (existsSync(dir)) {
+    const data = {};
+    for (const store of PROJECT_STORES) {
+      const f = join(dir, `${store}.json`);
+      data[store] = existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : [];
+    }
+    return { data, from: dir };
+  }
+  const data = {};
+  let found = 0;
+  for (const store of PROJECT_STORES) {
+    const raw = ghGetRaw(repo, `snapshots/${ts}/${store}.json`);
+    if (raw === null) { data[store] = []; continue; }
+    data[store] = JSON.parse(raw);
+    found++;
+  }
+  if (!found) return null;
+  return { data, from: `${repo.slug} 的 snapshots/${ts}/` };
 }
 
 export function writeData(repo, data, message) {
