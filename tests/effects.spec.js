@@ -403,4 +403,30 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     });
     expect(nOn).toBe(2); // demo 原本那一個 + 新插入且開粒子的這一個
   });
+
+  test('ambient synth：未互動不出聲；一次手勢後開始，波形有動', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    // 未互動：沒有 running 的 audio context（模組尚未 start）
+    const before = await page.evaluate(() => window.__mfxAudioStarted === true);
+    expect(before).toBeFalsy();
+    // 一次手勢
+    await page.mouse.wheel(0, 200);
+    await page.waitForTimeout(2500);
+    const eqMoved = await page.evaluate(() => {
+      var c = document.querySelector('#ambient-eq');
+      var g = c.getContext('2d');
+      function paint() { var d = g.getImageData(0,0,c.width,c.height).data, n=0;
+        for (var i=3;i<d.length;i+=4) if (d[i]>10) n++; return n; }
+      var a = paint();
+      return new Promise(function (res) { setTimeout(function () { res(a !== paint()); }, 500); });
+    });
+    expect(eqMoved).toBeTruthy();
+  });
+
+  test('ambient：開關是可聚焦的 button', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    const btn = page.locator('.mfx-snd');
+    await expect(btn).toHaveCount(1);
+    expect(await btn.evaluate((el) => el.tagName)).toBe('BUTTON');
+  });
 });

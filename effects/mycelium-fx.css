@@ -137,3 +137,15 @@
 }
 @keyframes mfx-cloudpass { from { transform: translateX(0); } to { transform: translateX(230vw); } }
 @media (prefers-reduced-motion: reduce) { .mfx-scenery-shade::before { animation: none; } }
+
+/* 環境配樂開關：頁面右上，前 10 秒清楚、之後退到低調。 */
+.mfx-snd {
+  position: fixed; top: 1.1rem; right: 1.1rem; z-index: 50; border: 0;
+  background: rgba(255,255,255,.82); color: #4a565e; font: inherit; font-size: .76rem;
+  letter-spacing: .18em; padding: .55rem 1.15rem; border-radius: 2rem; cursor: pointer;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  box-shadow: 0 2px 12px rgba(60,80,70,.14); opacity: 1; transition: opacity .8s ease, background .3s;
+}
+.mfx-snd.rest { opacity: .34; }
+.mfx-snd:hover { opacity: 1; }
+@media (max-width: 700px) { .mfx-snd { top: .7rem; right: .7rem; font-size: .72rem; padding: .5rem 1rem; } }

@@ -183,7 +183,14 @@ footer.site a:hover{color:var(--ink);border-color:var(--ink)}
       <a href="#eyelid"><u>eyelid</u>睜眼</a>
       <a href="#scramble"><u>scramble</u>亂序</a>
       <a href="#stutter"><u>stutter</u>重複</a>
+    </nav>
+  </div>
+
+  <div class="rail-block">
+    <p class="rail-label">模組</p>
+    <nav aria-label="模組段落">
       <a href="#scenery"><u>scenery</u>場景背景</a>
+      <a href="#ambient"><u>ambient</u>環境配樂</a>
     </nav>
   </div>
 </aside>
@@ -337,6 +344,15 @@ footer.site a:hover{color:var(--ink);border-color:var(--ink)}
     <div style="height:40vh"></div>
   </section>
 
+  <!-- ── 環境配樂 ─────────────────────────────────────── -->
+  <section class="fx" id="ambient">
+    <p class="eyebrow">&lt;div <b>data-fx="ambient"</b> data-fx-preset="soft-f" data-fx-eq="#ambient-eq"&gt;</p>
+    <h3>環境配樂（即時合成）</h3>
+    <p>不放音檔，即時合成一段留白多、延音長的環境音。右上角開關，一捲動就會自動播。下面這條折線是它的波形。</p>
+    <div data-fx="ambient" data-fx-preset="soft-f" data-fx-eq="#ambient-eq"></div>
+    <canvas id="ambient-eq" style="width:min(26em,80vw);height:44px;display:block;margin:1rem auto;opacity:.6"></canvas>
+  </section>
+
   </div>
 </main>
 
@@ -357,6 +373,7 @@ footer.site a:hover{color:var(--ink);border-color:var(--ink)}
 
 <script src="mycelium-fx.js"></script>
 <script src="mycelium-scenery.js" defer></script>
+<script src="mycelium-audio.js" defer></script>
 <script>
 /* 示範頁自己的控制程式：只呼叫函式庫公開的 API，不碰內部狀態。
    所有監聽都是 passive，示範頁本身不攔任何輸入。 */
