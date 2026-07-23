@@ -4,6 +4,20 @@ import { test, expect } from '@playwright/test';
 // (repos/yazelin/test-novel/contents/proposals[...]), stateful enough to
 // support list -> read -> PUT(applied/<name>) -> DELETE(<name>) round trips.
 // Mirrors the approach in tests/github-sync.spec.js.
+//
+// Two extra knobs beyond the basic file map, both opt-in via `state` so
+// every existing test (which never sets them) is unaffected:
+//   - state.phantomEntries: [{name, path, sha}] — appears in the directory
+//     listing (GET proposals) but has no entry in state.files, so the
+//     individual GET 404s. Models GitHub Contents API's eventual
+//     consistency: right after markProposalApplied's PUT+DELETE, a fresh
+//     directory listing can still briefly include the just-deleted file,
+//     which then 404s when fetched — the exact real-world sequence in
+//     issue #27, which a fully-consistent stateful mock can't reproduce any
+//     other way.
+//   - state.overrideStatus: Map<path, number> — forces the individual GET
+//     for that path to return the given HTTP status (e.g. 401) instead of
+//     the normal file lookup, to test non-404 fetch failures.
 function installProposalsRoute(page, state) {
   return page.route('https://api.github.com/repos/yazelin/test-novel/contents/**', async (route) => {
     const req = route.request();
@@ -27,7 +41,12 @@ function installProposalsRoute(page, state) {
         if ([...state.files.keys()].some((p) => p.startsWith('proposals/applied/'))) {
           entries.push({ type: 'dir', name: 'applied', path: 'proposals/applied' });
         }
+        for (const p of state.phantomEntries || []) entries.push({ type: 'file', ...p });
         await route.fulfill({ json: entries });
+        return;
+      }
+      if (state.overrideStatus && state.overrideStatus.has(path)) {
+        await route.fulfill({ status: state.overrideStatus.get(path), json: { message: 'mocked failure' } });
         return;
       }
       const file = state.files.get(path);
@@ -210,6 +229,10 @@ test('an applied proposal is moved to proposals/applied/ and does not reappear i
   // #pr-apply's own handler already re-lists after marking the proposal applied.
   await expect(page.locator('#pr-status')).toContainText('沒有可套用的提案', { timeout: 10_000 });
   await expect(page.locator('#pr-list li')).toHaveCount(0);
+  // issue #27: the applied proposal disappearing must not leave any
+  // "格式不正確" ghost behind, on the list or in the status line.
+  await expect(page.locator('#pr-status')).not.toContainText('格式不正確');
+  await expect(page.locator('#pr-review')).not.toContainText('格式不正確');
 
   expect(state.files.has('proposals/20260201-090000.json')).toBe(false);
   expect(state.files.has('proposals/applied/20260201-090000.json')).toBe(true);
@@ -218,6 +241,47 @@ test('an applied proposal is moved to proposals/applied/ and does not reappear i
   await page.locator('#pr-refresh').click();
   await expect(page.locator('#pr-status')).toContainText('沒有可套用的提案');
   await expect(page.locator('#pr-list li')).toHaveCount(0);
+  await expect(page.locator('#pr-status')).not.toContainText('格式不正確');
+});
+
+// issue #27: this is the actual bug — the GitHub Contents API is eventually
+// consistent, so a directory listing can still include a file for a brief
+// window after it was moved to proposals/applied/ by a just-succeeded
+// apply. When that happens, the per-item content fetch 404s. The old code
+// funneled that 404 into the exact same "格式不正確" (malformed content)
+// message as a broken JSON file, which is what misled the repo owner into
+// thinking a fully-successful apply had failed.
+test('a listing entry whose fetch 404s shows "already applied/removed" wording, not 格式不正確', async ({ page }) => {
+  const state = {
+    dirExists: true,
+    files: new Map(),
+    phantomEntries: [{ name: '20260101-000000.json', path: 'proposals/20260101-000000.json', sha: 'sha-ghost' }],
+    requests: [],
+  };
+  await installProposalsRoute(page, state);
+
+  await page.locator('#pr-refresh').click();
+  await expect(page.locator('#pr-list li')).toHaveCount(1);
+  await expect(page.locator('#pr-list li')).toContainText('已經套用或被移除');
+  await expect(page.locator('#pr-list li')).toContainText('重新整理提案清單');
+  await expect(page.locator('#pr-list li')).not.toContainText('格式不正確');
+  await expect(page.locator('.pr-open')).toHaveCount(0); // nothing to open — the file is gone
+});
+
+test('a 401 while listing shows an auth error, not a format error', async ({ page }) => {
+  const state = {
+    dirExists: true,
+    files: new Map([['proposals/20260101-000000.json', { sha: 'sha-a', content: makeProposal() }]]),
+    overrideStatus: new Map([['proposals/20260101-000000.json', 401]]),
+    requests: [],
+  };
+  await installProposalsRoute(page, state);
+
+  await page.locator('#pr-refresh').click();
+  await expect(page.locator('#pr-list li')).toHaveCount(1);
+  await expect(page.locator('#pr-list li')).toContainText('認證失敗');
+  await expect(page.locator('#pr-list li')).not.toContainText('格式不正確');
+  await expect(page.locator('.pr-open')).toHaveCount(0);
 });
 
 test('a malformed proposal is refused with a clear error and changes nothing', async ({ page }) => {

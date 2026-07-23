@@ -60,21 +60,67 @@ export async function listProposals(projectId) {
 
   const items = [];
   for (const f of files) {
-    const item = { name: f.name, path: f.path };
-    try {
-      const fileRes = await ghFetch(contentsUrl(repo, f.path));
-      if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status}`);
-      const fileJson = await fileRes.json();
-      const data = JSON.parse(b64DecodeUtf8(fileJson.content));
-      item.data = data;
-      item.valid = isValidProposal(data);
-    } catch (e) {
-      item.error = e.message;
-      item.valid = false;
-    }
-    items.push(item);
+    items.push(await fetchListItem(repo, f));
   }
   return { exists: true, items };
+}
+
+// Fetches and classifies one listed proposal file's content. Kept separate
+// from listProposals' loop so the two failure kinds this issue is about stay
+// textually distinct instead of sharing a try/catch:
+//   - 'gone'/'auth'/'fetch': the file itself couldn't be read (404 because it
+//     was moved to proposals/applied/ by an apply that already succeeded,
+//     401 because the PAT is bad/expired, or any other transport failure) —
+//     none of these say anything about the file's *content*, so they must
+//     never render as 「格式不正確」.
+//   - 'invalid': the file WAS read, but its JSON/shape is actually broken.
+// item.valid stays false for both, since neither is applicable — only
+// item.errorKind tells the UI which message family to show.
+async function fetchListItem(repo, f) {
+  const item = { name: f.name, path: f.path };
+  let fileRes;
+  try {
+    fileRes = await ghFetch(contentsUrl(repo, f.path));
+  } catch (e) {
+    item.valid = false;
+    item.errorKind = 'fetch';
+    item.error = `讀取失敗：${e.message}`;
+    return item;
+  }
+  if (fileRes.status === 404) {
+    item.valid = false;
+    item.errorKind = 'gone';
+    item.error = '這份提案檔已經不存在，可能已經套用或被移除了，請重新整理提案清單。';
+    return item;
+  }
+  if (fileRes.status === 401) {
+    item.valid = false;
+    item.errorKind = 'auth';
+    item.error = '認證失敗（HTTP 401），請確認 GitHub Personal Access Token 是否正確或已過期。';
+    return item;
+  }
+  if (!fileRes.ok) {
+    const d = await fileRes.json().catch(() => ({}));
+    item.valid = false;
+    item.errorKind = 'fetch';
+    item.error = `讀取失敗（HTTP ${fileRes.status}）。` + (d.message ? `（GitHub 訊息：${d.message}）` : '');
+    return item;
+  }
+  try {
+    const fileJson = await fileRes.json();
+    const data = JSON.parse(b64DecodeUtf8(fileJson.content));
+    item.data = data;
+    item.valid = isValidProposal(data);
+    if (!item.valid) {
+      item.errorKind = 'invalid';
+      item.error = 'entities / relations / foreshadow 必須都是陣列，且每筆都要是物件。';
+    }
+  } catch (e) {
+    item.valid = false;
+    item.errorKind = 'invalid';
+    item.error = '這份提案檔不是合法的 JSON。';
+  }
+  return item;
 }
 
 /**
