@@ -35,3 +35,9 @@ li.overdue { background: #fde2e2; }
 .footer-icon[aria-label^="GitHub"]:hover { color: #1a2420; border-color: rgba(26, 36, 32, .4); }
 .footer-icon[aria-label="Facebook"]:hover { color: #1877f2; border-color: rgba(24, 119, 242, .5); }
 .footer-icon[aria-label^="請作者"]:hover { color: #d69e00; border-color: rgba(214, 158, 0, .5); }
+
+.proposals-settings .hint { color: #666; font-size: .9em; }
+.proposals-settings ul { list-style: none; padding: 0; }
+.proposals-settings li { border: 1px solid #ddd; border-radius: .25rem; padding: .5rem .75rem; margin-bottom: .5rem; background: #fff; }
+.pr-meta { color: #666; font-size: .85em; margin: .2rem 0; }
+.pr-invalid { color: #a33; }

@@ -2,10 +2,13 @@
 import { collectProjectData, replaceProjectData } from './backup.js';
 import { listProjects, PROJECT_STORES } from './db.js';
 
-function b64EncodeUtf8(str) { return btoa(unescape(encodeURIComponent(str))); }
-function b64DecodeUtf8(str) { return decodeURIComponent(escape(atob(str))); }
+// Exported (not just used internally) so proposals.js can talk to the same
+// GitHub Contents API endpoints with the same PAT-header handling and
+// owner/name resolution, instead of re-implementing them.
+export function b64EncodeUtf8(str) { return btoa(unescape(encodeURIComponent(str))); }
+export function b64DecodeUtf8(str) { return decodeURIComponent(escape(atob(str))); }
 
-async function ghFetch(url, options = {}) {
+export async function ghFetch(url, options = {}) {
   const pat = localStorage.getItem('mycelium-github-pat');
   if (!pat) throw new Error('請先在設定填 GitHub PAT。');
   return fetch(url, {
@@ -14,7 +17,7 @@ async function ghFetch(url, options = {}) {
   });
 }
 
-async function projectRepo(projectId) {
+export async function projectRepo(projectId) {
   const projects = await listProjects();
   const project = projects.find((p) => p.id === projectId);
   if (!project || !project.repo || !project.repo.owner || !project.repo.name) throw new Error('這個作品尚未綁定 GitHub repo。');
