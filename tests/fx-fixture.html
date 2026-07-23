@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mycelium-fx 測試用固定頁</title>
+<link rel="stylesheet" href="../effects/mycelium-fx.css">
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; line-height: 2; }
+  .spacer { height: 150vh; padding: 1rem; background: #eee; }
+  .region { padding: 1rem; background: #ddd; }
+  .tall { min-height: 250vh; }
+</style>
+</head>
+<body>
+
+<button id="toggle" data-fx-toggle data-fx-label-on="特效：開" data-fx-label-off="特效：關">特效：開</button>
+
+<div class="spacer" id="top">頁首留白，讓凍結段落一開始不在視窗內。</div>
+
+<p id="freeze-a" data-fx="freeze" data-fx-ms="900">白衣客停在門口。</p>
+
+<div class="spacer">中間留白。</div>
+
+<div class="region tall" id="drag-a" data-fx="drag" data-fx-factor="3">
+  <p>阻力區域：捲動輸入會被除以三。</p>
+</div>
+
+<p id="scramble-a" data-fx="scramble" data-fx-level="0.5">城主說完那句話之後屋子裡沒有人接話落雨劍客把杯子放回桌上</p>
+
+<p id="stutter-a" data-fx="stutter" data-fx-times="3">林小雨沒有回頭。她走進雨裡。</p>
+
+<div class="region" id="after-a" data-fx="afterimage" data-fx-opacity="0.04">
+  <p>殘影區域：黑袍人站在橋的中間。</p>
+</div>
+
+<div class="spacer">頁尾留白。</div>
+
+<script src="../effects/mycelium-fx.js"></script>
+</body>
+</html>

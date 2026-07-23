@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>敘事效果庫 — mycelium-fx</title>
+<meta name="description" content="捲動驅動的敘事效果：阻力、凍結、殘影、睜眼、亂序、重複。可即時調參數。">
+<link rel="stylesheet" href="mycelium-fx.css">
+<style>
+:root{
+  --paper:#e3e6e0;
+  --paper-deep:#d3d8d1;
+  --ink:#13181b;
+  --ink-soft:#4a5450;
+  --rail:#0c1013;
+  --rail-line:#232b30;
+  --rail-text:#93a09a;
+  --signal:#d2452f;
+  --cold:#4d7b95;
+  --serif:"Songti TC","Noto Serif TC","Source Han Serif TC","Noto Serif CJK TC",serif;
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono","Noto Sans Mono CJK TC",monospace;
+  --rail-w:17rem;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:auto}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--serif);font-size:1.0625rem;line-height:2;
+  -webkit-text-size-adjust:100%;
+}
+
+/* ── 儀表軌：左側固定的控制台 ───────────────────────────── */
+#rail{
+  position:fixed;inset:0 auto 0 0;width:var(--rail-w);z-index:30;
+  background:var(--rail);color:var(--rail-text);
+  font-family:var(--mono);font-size:.75rem;line-height:1.7;
+  display:flex;flex-direction:column;overflow-y:auto;
+  border-right:1px solid var(--rail-line);
+}
+#rail h1{
+  margin:0;padding:1.15rem 1.1rem .9rem;
+  font-family:var(--mono);font-size:.8rem;font-weight:500;letter-spacing:.14em;
+  color:#e6ecea;border-bottom:1px solid var(--rail-line);
+}
+#rail h1 small{display:block;font-size:.68rem;letter-spacing:.02em;color:#5d6b66;margin-top:.3rem}
+.rail-block{padding:.9rem 1.1rem;border-bottom:1px solid var(--rail-line)}
+.rail-label{color:#5d6b66;letter-spacing:.1em;font-size:.68rem;margin-bottom:.5rem}
+
+/* 狀態燈：函式庫此刻在做什麼 */
+.lamps{display:grid;gap:.3rem}
+.lamp{display:flex;align-items:center;gap:.55rem}
+.lamp i{
+  width:.5rem;height:.5rem;border-radius:50%;flex:none;
+  background:#1d2529;box-shadow:inset 0 0 0 1px #2f393e;
+}
+.lamp.on i{background:var(--signal);box-shadow:0 0 .5rem var(--signal)}
+.lamp.on{color:#e6ecea}
+
+/* 輸入 / 實際前進 的雙條計量 */
+.meter{margin-top:.15rem}
+.meter-row{display:flex;align-items:center;gap:.5rem;margin:.25rem 0}
+.meter-row span{width:3.4rem;color:#5d6b66;font-size:.68rem}
+.bar{flex:1;height:.4rem;background:#171d21;position:relative;overflow:hidden}
+.bar b{position:absolute;inset:0 auto 0 0;width:0;background:var(--cold);display:block}
+.meter-row.out .bar b{background:var(--signal)}
+
+#rail nav{display:grid;gap:.1rem}
+#rail nav a{color:var(--rail-text);text-decoration:none;padding:.2rem 0;display:flex;gap:.6rem}
+#rail nav a u{color:#5d6b66;text-decoration:none;width:5.2rem;flex:none}
+#rail nav a:hover,#rail nav a:focus-visible{color:#fff}
+
+.switch{display:flex;align-items:center;gap:.6rem;cursor:pointer;color:#e6ecea}
+.switch input{accent-color:var(--signal);width:1rem;height:1rem}
+.rail-note{color:#5d6b66;font-size:.68rem;line-height:1.6;margin:.55rem 0 0}
+
+/* ── 閱讀欄 ─────────────────────────────────────────────── */
+main{margin-left:var(--rail-w);padding:0 2rem 8rem;}
+.col{max-width:34rem;margin:0 auto}
+
+header.hero{padding:22vh 0 14vh}
+.hero p.kicker{
+  font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;color:var(--ink-soft);
+  margin:0 0 1.6rem;
+}
+.hero h2{
+  font-size:clamp(2.2rem,6vw,3.4rem);line-height:1.25;margin:0 0 1.6rem;
+  font-weight:600;letter-spacing:.02em;
+}
+.hero h2 em{font-style:normal;border-bottom:.28rem solid var(--signal);padding-bottom:.15rem}
+.hero p.lede{margin:0 0 1rem;color:var(--ink-soft)}
+
+section.fx{padding:16vh 0;border-top:1px solid rgba(19,24,27,.14)}
+.eyebrow{
+  font-family:var(--mono);font-size:.72rem;color:var(--ink-soft);
+  margin:0 0 .8rem;word-break:break-all;
+}
+.eyebrow b{color:var(--signal);font-weight:500}
+section.fx h3{font-size:1.55rem;margin:0 0 .6rem;font-weight:600;letter-spacing:.03em}
+section.fx > p.desc{margin:0 0 1.4rem;color:var(--ink-soft);font-size:.98rem;line-height:1.9}
+
+/* 控制盒：貼著段落，調完立刻按「再放一次」 */
+.knobs{
+  font-family:var(--mono);font-size:.75rem;color:var(--ink-soft);
+  background:var(--paper-deep);padding:.85rem 1rem;margin:0 0 1.8rem;
+  display:flex;flex-wrap:wrap;gap:.75rem 1.4rem;align-items:center;
+}
+.knob{display:flex;align-items:center;gap:.55rem}
+.knob input[type=range]{width:8rem;accent-color:var(--signal)}
+.knob output{color:var(--ink);min-width:2.6rem}
+button.replay{
+  font:inherit;font-family:var(--mono);cursor:pointer;
+  background:var(--ink);color:var(--paper);border:0;padding:.4rem .9rem;
+}
+button.replay:hover{background:var(--signal)}
+button.replay:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+
+.passage p{margin:0 0 1.35rem}
+.passage p:last-child{margin-bottom:0}
+.tall{min-height:150vh}
+.stage{background:var(--paper-deep);padding:1.6rem 1.4rem}
+
+footer.site{
+  margin-left:var(--rail-w);padding:3rem 2rem 4rem;text-align:center;
+  font-family:var(--mono);font-size:.72rem;color:var(--ink-soft);
+  border-top:1px solid rgba(19,24,27,.14);
+}
+footer.site nav{display:flex;gap:.75rem;justify-content:center;margin-bottom:1rem}
+footer.site a{
+  color:var(--ink-soft);display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border-radius:50%;border:1px solid rgba(19,24,27,.2);
+}
+footer.site a:hover{color:var(--ink);border-color:var(--ink)}
+
+@media (max-width:900px){
+  :root{--rail-w:0px}
+  #rail{
+    inset:auto 0 0 0;width:auto;max-height:45vh;flex-direction:column-reverse;
+    border-right:0;border-top:1px solid var(--rail-line);
+  }
+  #rail h1{padding:.7rem 1rem;border-bottom:0;border-top:1px solid var(--rail-line)}
+  #rail h1 small{display:inline;margin-left:.6rem}
+  main{margin-left:0;padding:0 1.25rem 60vh}
+  footer.site{margin-left:0;padding-bottom:56vh}
+  #rail nav{grid-template-columns:1fr 1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  .lamp.on i{box-shadow:none}
+}
+</style>
+</head>
+<body>
+
+<aside id="rail" aria-label="效果控制台">
+  <h1>mycelium-fx<small>敘事效果庫 · 控制台</small></h1>
+
+  <div class="rail-block">
+    <label class="switch">
+      <input type="checkbox" data-fx-toggle checked>
+      特效總開關
+    </label>
+    <p class="rail-note">關掉之後全部效果立刻停用，並記在這台瀏覽器裡。系統設為「減少動態」時一律不啟用。</p>
+  </div>
+
+  <div class="rail-block">
+    <p class="rail-label">現在發生什麼</p>
+    <div class="lamps">
+      <div class="lamp" id="lamp-drag"><i></i>阻力生效中</div>
+      <div class="lamp" id="lamp-armed"><i></i>凍結已上膛</div>
+      <div class="lamp" id="lamp-frozen"><i></i>凍結擊發中</div>
+    </div>
+    <div class="meter">
+      <div class="meter-row"><span>捲動輸入</span><div class="bar"><b id="bar-in"></b></div></div>
+      <div class="meter-row out"><span>實際前進</span><div class="bar"><b id="bar-out"></b></div></div>
+    </div>
+  </div>
+
+  <div class="rail-block">
+    <p class="rail-label">六個原語</p>
+    <nav aria-label="效果段落">
+      <a href="#drag"><u>drag</u>阻力</a>
+      <a href="#freeze"><u>freeze</u>凍結</a>
+      <a href="#afterimage"><u>afterimage</u>殘影</a>
+      <a href="#eyelid"><u>eyelid</u>睜眼</a>
+      <a href="#scramble"><u>scramble</u>亂序</a>
+      <a href="#stutter"><u>stutter</u>重複</a>
+    </nav>
+  </div>
+</aside>
+
+<main>
+  <div class="col">
+
+  <header class="hero">
+    <p class="kicker">SCROLL-DRIVEN NARRATIVE EFFECTS</p>
+    <h2>讀者不是讀到世界在劣化，是<em>他的畫面在劣化</em>。</h2>
+    <p class="lede">六個捲動驅動的原語，寫文章時只標一個 <code>data-fx</code> 屬性。零依賴、沒有 build 步驟，關掉 JavaScript 一樣讀得完整篇。</p>
+    <p class="lede">這頁的每一段都可以現場調參數再放一次——手感這種東西看說明是判斷不出來的，要自己捲一次。左邊的儀表會告訴你此刻函式庫在做什麼。</p>
+  </header>
+
+  <!-- ── 阻力 ─────────────────────────────────────────── -->
+  <section class="fx" id="drag">
+    <p class="eyebrow">&lt;div <b>data-fx="drag"</b> data-fx-factor="1.8"&gt;</p>
+    <h3>阻力</h3>
+    <p class="desc">慢性、整個區域。捲動輸入被除以倍率，捲好幾行才前進一行。它是區域屬性不是計時事件，所以讀者停下來讀多久都不會被浪費。倍率上限 3——再高就不是「重」，是「壞掉」。手機另外算：接管 <code>touchmove</code> 會殺掉原生慣性，同樣的倍率在手機上會被讀成卡住，所以打了折並補回一段自訂慣性。</p>
+    <div class="knobs">
+      <label class="knob">倍率
+        <input type="range" min="1" max="3" step="0.1" value="1.8" id="k-drag">
+        <output for="k-drag" id="o-drag">1.8×</output>
+      </label>
+      <span>捲進下面那塊就會變重</span>
+    </div>
+    <div class="stage tall passage" data-fx="drag" data-fx-factor="1.8">
+      <p>雨從城門那邊過來，先打在瓦上，再打在人身上。林小雨把袖子拉高了一點，水還是順著手腕往下走。</p>
+      <p>她已經在這條街上站了很久。久到石板的涼從鞋底一路爬上來，久到她開始數對面屋簷滴下來的水，數到第幾滴就不記得了。</p>
+      <p>街的另一頭有人在走，腳步很慢。白衣客沒有撐傘，衣服濕透了貼在身上，他也不像在意。</p>
+      <p>他走過第一盞燈，走過第二盞。第三盞燈是壞的，所以那一段路他整個人是黑的，再出現的時候已經近了很多。</p>
+      <p>林小雨沒有動。她只是把手裡的東西握得更緊了一些。</p>
+      <p>雨聲把所有其他的聲音都蓋掉了。城裡沒有人聲，也沒有更夫，只有水打在石板上，一遍一遍，像有人在很遠的地方反覆問同一句話。</p>
+      <p>白衣客在離她三步的地方停下來。他看了她一眼，什麼也沒說，又往前走了。</p>
+      <p>她轉過身，看著他的背影走進更深的雨裡，直到看不見。</p>
+    </div>
+  </section>
+
+  <!-- ── 凍結 ─────────────────────────────────────────── -->
+  <section class="fx" id="freeze">
+    <p class="eyebrow">&lt;p <b>data-fx="freeze"</b> data-fx-ms="240"&gt;</p>
+    <h3>凍結</h3>
+    <p class="desc">急性、單一事件。它是<strong>上膛→擊發</strong>：進入視窗只上膛，<strong>下一次捲動輸入才擊發</strong>。讀者常常捲到定點後停下來讀好幾分鐘，如果進視窗就開始計時，等他要繼續時效果早就無聲跑完了。上膛之後不管他停多久，這一下一定打在他主動想前進的那一刻——他推了，世界沒動。</p>
+    <p class="desc">預設 240 毫秒，落在知覺門檻底下：不該被「發現」，該是身體先知道。上限 3 秒，而且絕不在頁面剛載入時觸發。鍵盤與捲軸完全不攔，那是逃生出口。</p>
+    <div class="knobs">
+      <label class="knob">毫秒
+        <input type="range" min="60" max="3000" step="20" value="240" id="k-freeze">
+        <output for="k-freeze" id="o-freeze">240ms</output>
+      </label>
+      <button class="replay" id="r-freeze">重新上膛</button>
+    </div>
+    <div class="stage passage">
+      <p>他們在城主府外面等到天亮。</p>
+      <p id="freeze-target" data-fx="freeze" data-fx-ms="240">門開的時候，落雨劍客回頭看了一眼——就是這一段，捲到這裡它就上膛了，你下一次捲動它才擊發。</p>
+      <p>後來誰也沒有再提起那個早上。</p>
+    </div>
+  </section>
+
+  <!-- ── 殘影 ─────────────────────────────────────────── -->
+  <section class="fx" id="afterimage">
+    <p class="eyebrow">&lt;div <b>data-fx="afterimage"</b> data-fx-opacity="0.035"&gt;</p>
+    <h3>殘影</h3>
+    <p class="desc">疊加。把內容真的複製一層，<code>position: fixed</code>、透明度 2–5%，而且不跟著捲——讀者往下捲，舊位置的影子還留在原地，慢慢追上來。是視覺暫留，不是蓋一層色片；沒有 canvas，沒有截圖，就是一份 <code>aria-hidden</code> 的 DOM。</p>
+    <div class="knobs">
+      <label class="knob">透明度
+        <input type="range" min="0.01" max="0.12" step="0.005" value="0.035" id="k-after">
+        <output for="k-after" id="o-after">0.035</output>
+      </label>
+      <label class="knob">追上速度
+        <input type="range" min="0.01" max="0.3" step="0.005" value="0.055" id="k-lag">
+        <output for="k-lag" id="o-lag">0.055</output>
+      </label>
+      <span>要邊捲邊看</span>
+    </div>
+    <div class="stage tall passage" data-fx="afterimage" data-fx-opacity="0.035" data-fx-lag="0.055">
+      <p>黑袍人站在橋的中間，兩邊都是水。</p>
+      <p>林小雨走到橋頭就停住了。不是因為害怕，是因為她忽然覺得這一幕她見過——同樣的橋，同樣的位置，同樣的水聲，連風吹過來的角度都一樣。</p>
+      <p>她閉上眼睛再睜開，那個人還在，只是又遠了一點。</p>
+      <p>「你看見的不是我。」黑袍人說，聲音被水聲拉得很長。</p>
+      <p>她沒有回答。她只是往前走了一步，然後又一步。橋很長，走到一半的時候，她已經分不清哪一邊是自己來的方向。</p>
+      <p>水一直在流。橋一直在那裡。人影還在原本的位置上，慢慢地、慢慢地淡下去。</p>
+    </div>
+  </section>
+
+  <!-- ── 睜眼 ─────────────────────────────────────────── -->
+  <section class="fx" id="eyelid">
+    <p class="eyebrow">&lt;section <b>data-fx="eyelid"</b> data-fx-slit="10" data-fx-open="70"&gt;</p>
+    <h3>睜眼</h3>
+    <p class="desc">進場。全黑中留一條縫，捲動之後逐漸展開到全螢幕。進度是由捲動位置算的，不是計時也不是攔截，所以鍵盤捲動一樣打得開；黑幕 <code>pointer-events: none</code>，底下的字隨時可以選取。另外有保險：就算完全不捲，時間到也會全開，不會有人被關在黑幕裡。</p>
+    <div class="knobs">
+      <label class="knob">縫寬 vh
+        <input type="range" min="0" max="40" step="1" value="10" id="k-slit">
+        <output for="k-slit" id="o-slit">10</output>
+      </label>
+      <label class="knob">展開距離 vh
+        <input type="range" min="20" max="200" step="5" value="70" id="k-open">
+        <output for="k-open" id="o-open">70</output>
+      </label>
+      <button class="replay" id="r-eyelid">閉上再睜開</button>
+    </div>
+    <div class="stage passage" id="eyelid-target" data-fx="eyelid" data-fx-slit="10" data-fx-open="70">
+      <p>先是聲音回來的。屋外有水，屋內有火，火比水小聲。</p>
+      <p>然後是光。很細的一條，橫過整個視野，亮得讓人想再閉上。</p>
+      <p>林小雨用了很久才想起來要怎麼睜開眼睛。等她真的睜開了，才發現天已經亮了很久。</p>
+    </div>
+  </section>
+
+  <!-- ── 亂序 ─────────────────────────────────────────── -->
+  <section class="fx" id="scramble">
+    <p class="eyebrow">&lt;p <b>data-fx="scramble"</b> data-fx-level="0.25"&gt;</p>
+    <h3>亂序</h3>
+    <p class="desc">文字。相鄰兩個中文字對調位置，字序打亂但仍然讀得懂。<strong>DOM 裡永遠是正確的原文</strong>——每個字包一層 <code>span</code>，只用 <code>transform</code> 換視覺位置，所以螢幕閱讀器、複製貼上、Ctrl+F 拿到的都是原句。可以在下面那段直接框選複製驗證。</p>
+    <div class="knobs">
+      <label class="knob">亂度
+        <input type="range" min="0" max="0.6" step="0.05" value="0.25" id="k-scramble">
+        <output for="k-scramble" id="o-scramble">0.25</output>
+      </label>
+      <button class="replay" id="r-scramble">重放</button>
+    </div>
+    <div class="stage passage">
+      <p id="scramble-target" data-fx="scramble" data-fx-level="0.25">城主說完那句話之後，屋子裡沒有人接話。落雨劍客把杯子放回桌上，聲音輕得像沒有放下去，然後他站起來，走到窗邊看外面的雨。</p>
+    </div>
+  </section>
+
+  <!-- ── 重複 ─────────────────────────────────────────── -->
+  <section class="fx" id="stutter">
+    <p class="eyebrow">&lt;p <b>data-fx="stutter"</b> data-fx-times="3"&gt;</p>
+    <h3>重複</h3>
+    <p class="desc">文字。同一段遞增地重複：先重複一句，再重複一整段。複本全部 <code>aria-hidden</code>，螢幕閱讀器與複製只會拿到一份原文，複本純粹是視覺上的殘響。</p>
+    <div class="knobs">
+      <label class="knob">次數
+        <input type="range" min="1" max="6" step="1" value="3" id="k-stutter">
+        <output for="k-stutter" id="o-stutter">3</output>
+      </label>
+      <button class="replay" id="r-stutter">重放</button>
+    </div>
+    <div class="stage passage">
+      <p id="stutter-target" data-fx="stutter" data-fx-times="3">白衣客說，你回去吧。</p>
+      <p>她沒有回去。</p>
+    </div>
+  </section>
+
+  </div>
+</main>
+
+<footer class="site">
+  <nav aria-label="作者連結">
+    <a href="https://github.com/yazelin/mycelium" target="_blank" rel="noopener" aria-label="GitHub 原始碼" title="GitHub 原始碼">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+    </a>
+    <a href="https://www.facebook.com/yaze.lin.gm" target="_blank" rel="noopener" aria-label="Facebook" title="Facebook">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z"/></svg>
+    </a>
+    <a href="https://buymeacoffee.com/yazelin" target="_blank" rel="noopener" aria-label="請作者喝杯咖啡 Buy me a coffee" title="請作者喝杯咖啡 Buy me a coffee">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M20.216 6.415l-.132-.666c-.119-.598-.388-1.163-1.001-1.379-.197-.069-.42-.098-.57-.241-.152-.143-.196-.366-.231-.572-.065-.378-.125-.756-.192-1.133-.057-.325-.102-.69-.25-.987-.195-.4-.597-.634-.996-.788a5.723 5.723 0 00-.626-.194c-1-.263-2.05-.36-3.077-.416a25.834 25.834 0 00-3.7.062c-.915.083-1.88.184-2.75.5-.318.116-.646.256-.888.501-.297.302-.393.77-.177 1.146.154.267.415.456.692.58.36.162.737.284 1.123.366 1.075.238 2.189.331 3.287.37 1.218.05 2.437.01 3.65-.118.299-.033.598-.073.896-.119.352-.054.578-.513.474-.834-.124-.383-.457-.531-.834-.473-.466.074-.96.108-1.382.146-1.177.08-2.358.082-3.536.006a22.228 22.228 0 01-1.157-.107c-.086-.01-.18-.025-.258-.036-.243-.036-.484-.08-.724-.13-.111-.027-.111-.185 0-.212h.005c.277-.06.557-.108.838-.147h.002c.131-.009.263-.032.394-.048a25.076 25.076 0 013.426-.12c.674.019 1.347.067 2.017.144l.228.031c.267.04.533.088.798.145.392.085.895.113 1.07.542.055.137.08.288.111.431l.319 1.484a.237.237 0 01-.199.284h-.003c-.037.006-.075.01-.112.015a36.704 36.704 0 01-4.743.295 37.059 37.059 0 01-4.699-.304c-.14-.017-.293-.042-.417-.06-.326-.048-.649-.108-.973-.161-.393-.065-.768-.032-1.123.161-.29.16-.527.404-.675.701-.154.316-.199.66-.267 1-.069.34-.176.707-.135 1.056.087.753.613 1.365 1.37 1.502a39.69 39.69 0 0011.343.376.483.483 0 01.535.53l-.071.697-1.018 9.907c-.041.41-.047.832-.125 1.237-.122.637-.553 1.028-1.182 1.171-.577.131-1.165.2-1.756.205-.656.004-1.31-.025-1.966-.022-.699.004-1.556-.06-2.095-.58-.475-.458-.54-1.174-.605-1.793l-.731-7.013-.322-3.094c-.037-.351-.286-.695-.678-.678-.336.015-.718.3-.678.679l.228 2.185.949 9.112c.147 1.344 1.174 2.068 2.446 2.272.742.12 1.503.144 2.257.156.966.016 1.942.053 2.892-.122 1.408-.258 2.465-1.198 2.616-2.657.34-3.332.683-6.663 1.024-9.995l.215-2.087a.484.484 0 01.39-.426c.402-.078.787-.212 1.074-.518.455-.488.546-1.124.385-1.766zm-1.478.772c-.145.137-.363.201-.578.233-2.416.359-4.866.54-7.308.46-1.748-.06-3.477-.254-5.207-.498-.17-.024-.353-.055-.47-.18-.22-.236-.111-.71-.054-.995.052-.26.152-.609.463-.646.484-.057 1.046.148 1.526.22.577.088 1.156.159 1.737.212 2.48.226 5.002.19 7.472-.14.45-.06.899-.13 1.345-.21.399-.072.84-.206 1.08.206.166.281.188.657.162.974a.544.544 0 01-.169.364zm-6.159 3.9c-.862.37-1.84.788-3.109.788a5.884 5.884 0 01-1.569-.217l.877 9.004c.065.78.717 1.38 1.5 1.38 0 0 1.243.065 1.658.065.447 0 1.786-.065 1.786-.065.783 0 1.434-.6 1.499-1.38l.94-9.95a3.996 3.996 0 00-1.322-.238c-.826 0-1.491.284-2.26.613z"/></svg>
+    </a>
+  </nav>
+  <p>mycelium-fx · MIT © 林亞澤</p>
+</footer>
+
+<script src="mycelium-fx.js"></script>
+<script>
+/* 示範頁自己的控制程式：只呼叫函式庫公開的 API，不碰內部狀態。
+   所有監聽都是 passive，示範頁本身不攔任何輸入。 */
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  function knob(inputId, outId, fmt, apply) {
+    var input = $(inputId), out = $(outId);
+    function run() { out.textContent = fmt(input.value); apply(input.value); }
+    input.addEventListener('input', run);
+    run();
+  }
+
+  // 阻力：改屬性即可，它是區域屬性，不需要重播。
+  var dragEl = document.querySelector('[data-fx="drag"]');
+  knob('k-drag', 'o-drag', function (v) { return (+v).toFixed(1) + '×'; }, function (v) {
+    dragEl.setAttribute('data-fx-factor', v);
+  });
+
+  // 凍結：改毫秒 + 重新上膛。
+  var freezeEl = $('freeze-target');
+  knob('k-freeze', 'o-freeze', function (v) { return v + 'ms'; }, function (v) {
+    freezeEl.setAttribute('data-fx-ms', v);
+  });
+  $('r-freeze').addEventListener('click', function () {
+    MyceliumFX.replay(freezeEl);
+    freezeEl.scrollIntoView({ block: 'center' });
+  });
+
+  // 殘影：透明度與追上速度都是即時的。
+  var afterEl = document.querySelector('[data-fx="afterimage"]');
+  knob('k-after', 'o-after', function (v) { return (+v).toFixed(3); }, function (v) {
+    afterEl.setAttribute('data-fx-opacity', v);
+  });
+  knob('k-lag', 'o-lag', function (v) { return (+v).toFixed(3); }, function (v) {
+    afterEl.setAttribute('data-fx-lag', v);
+  });
+
+  // 睜眼：調完按「閉上再睜開」。
+  var lidEl = $('eyelid-target');
+  knob('k-slit', 'o-slit', String, function (v) { lidEl.setAttribute('data-fx-slit', v); });
+  knob('k-open', 'o-open', String, function (v) { lidEl.setAttribute('data-fx-open', v); });
+  $('r-eyelid').addEventListener('click', function () {
+    lidEl.scrollIntoView({ block: 'center' });
+    MyceliumFX.replay(lidEl);
+  });
+
+  // 亂序 / 重複：一次性效果，調完重放。
+  var scrambleEl = $('scramble-target');
+  knob('k-scramble', 'o-scramble', function (v) { return (+v).toFixed(2); }, function (v) {
+    scrambleEl.setAttribute('data-fx-level', v);
+    MyceliumFX.replay(scrambleEl);
+  });
+  $('r-scramble').addEventListener('click', function () { MyceliumFX.replay(scrambleEl); });
+
+  var stutterEl = $('stutter-target');
+  knob('k-stutter', 'o-stutter', String, function (v) {
+    stutterEl.setAttribute('data-fx-times', v);
+    MyceliumFX.replay(stutterEl);
+  });
+  $('r-stutter').addEventListener('click', function () { MyceliumFX.replay(stutterEl); });
+
+  // 儀表：狀態燈 + 輸入／實際前進雙條計量。
+  var lampDrag = $('lamp-drag'), lampArmed = $('lamp-armed'), lampFrozen = $('lamp-frozen');
+  var barIn = $('bar-in'), barOut = $('bar-out');
+  var rawIn = 0, moved = 0, lastY = window.scrollY;
+
+  window.addEventListener('wheel', function (e) {
+    rawIn = Math.min(1, rawIn + Math.abs(e.deltaY) / 240);
+  }, { passive: true });
+  window.addEventListener('scroll', function () {
+    var y = window.scrollY;
+    moved = Math.min(1, moved + Math.abs(y - lastY) / 240);
+    lastY = y;
+  }, { passive: true });
+
+  (function tick() {
+    var d = MyceliumFX._debug();
+    lampDrag.classList.toggle('on', d.drag);
+    lampArmed.classList.toggle('on', d.armed > 0);
+    lampFrozen.classList.toggle('on', d.frozen);
+    rawIn *= 0.88; moved *= 0.88;
+    barIn.style.width = (rawIn * 100).toFixed(1) + '%';
+    barOut.style.width = (moved * 100).toFixed(1) + '%';
+    requestAnimationFrame(tick);
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+/*!
+ * mycelium-fx — 敘事效果庫樣式
+ * 這份 CSS 只負責「效果長什麼樣」，不負責藏內容：
+ * 沒有 JS 的時候這裡沒有任何一條規則會讓文字消失。
+ * MIT © 林亞澤
+ */
+
+/* 殘影：內容的複本，固定不動、極低透明度、完全不可互動。 */
+.mfx-ghost {
+  position: fixed;
+  top: 0;
+  z-index: 2;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: transform;
+  filter: blur(0.3px);
+}
+
+/* 睜眼：上下兩條黑幕夾出一條縫。pointer-events: none，
+   所以就算 JS 出錯卡在半開，讀者仍然點得到、選得到底下的內容。 */
+.mfx-eyelid {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+.mfx-eyelid-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: #000;
+  box-shadow: 0 0 2.5rem 1.5rem #000;
+}
+.mfx-eyelid-top { top: 0; }
+.mfx-eyelid-bottom { bottom: 0; }
+
+/* 亂序：每個字包一層 span，位移只做視覺交換，DOM 文字仍是原文。 */
+.mfx-ch {
+  display: inline-block;
+  will-change: transform;
+}
+.mfx-scrambled {
+  /* 交換後的字會超出行框一點點，別讓它被裁掉 */
+  overflow: visible;
+}
+
+/* 重複：回音段落。aria-hidden，只是視覺上的殘響。 */
+.mfx-echo {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 阻力區域不需要任何樣式——它是行為不是外觀。 */
+
+/* 硬性要求：偏好減少動態時全部關閉，內容完整可讀。
+   （JS 端也會整個不掛監聽，這裡是第二道保險。） */
+@media (prefers-reduced-motion: reduce) {
+  .mfx-ghost,
+  .mfx-eyelid { display: none !important; }
+  .mfx-echo { display: none !important; }
+  .mfx-ch { transform: none !important; }
+}
+
+/* 全站關閉開關（localStorage）打開時同樣清乾淨。 */
+.mfx-off .mfx-ghost,
+.mfx-off .mfx-eyelid,
+.mfx-off .mfx-echo { display: none !important; }
+.mfx-off .mfx-ch { transform: none !important; }
