@@ -36,6 +36,10 @@ npm test           # 跑 Playwright 測試（39 個）
 
 設計文件：`docs/superpowers/specs/2026-07-22-mycelium-design.md`
 
+## 作者
+
+[yazelin](https://yazelin.github.io/) — [GitHub](https://github.com/yazelin) | [Facebook](https://www.facebook.com/yaze.lin.gm) | [Buy me a coffee](https://buymeacoffee.com/yazelin)
+
 ## 授權
 
 MIT，見 LICENSE。
