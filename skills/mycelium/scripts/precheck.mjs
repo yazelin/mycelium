@@ -44,12 +44,20 @@ export function outline(text) {
   return rows;
 }
 
+// 「未定案」「還沒拍板」裡面包著「定案」「拍板」，字面比對會把否定句判成已定案——
+// 意思剛好相反，而且錯的方向最糟（把還沒決定的當成不要再想）。先把否定形拔掉再比。
+const NEGATED_SETTLED = /(尚未|還沒|沒有|未|不|沒)(定案|拍板|寫死|已定)/g;
+
 /** 一行文字命中哪些標記類型。同一行可能同時是紅線與未決，兩邊都算。 */
 export function classify(text) {
   const kinds = [];
   if (OPEN_MARKERS.some((m) => text.includes(m))) kinds.push('open');
   if (RED_MARKERS.some((m) => text.includes(m))) kinds.push('red');
-  if (SETTLED_MARKERS.some((m) => text.includes(m))) kinds.push('settled');
+  // 未決優先：一行只要說了「還沒決定」，它就不是已定案的決定，
+  // 即使同一行也出現「寫死」（多半是「別寫死」這種否定用法，中間還可能隔著字）。
+  // 判錯的方向要挑安全的那邊——把未決當成定案＝叫人不要再想，最糟。
+  const settledText = text.replace(NEGATED_SETTLED, '');
+  if (!kinds.includes('open') && SETTLED_MARKERS.some((m) => settledText.includes(m))) kinds.push('settled');
   return kinds;
 }
 
@@ -88,6 +96,7 @@ export function buildPrecheck({ chapter, entities = [], relations = [], foreshad
   const must = [];
   const open = [];
   const red = [];
+  const settled = [];
   for (const doc of docs) {
     for (const row of outline(doc.text)) {
       // 一行要繼承它所在段落的相關性：「不准讓她主動求助」這行沒有角色名，
@@ -99,6 +108,8 @@ ${row.text}`, terms);
       // 未決與紅線只要沾到這一章或這一章的人就列；沒沾到的不吵。
       if (hits.length && kinds.includes('open')) open.push(where);
       if (hits.length && kinds.includes('red')) red.push(where);
+      // 已定案要印出來，而且要印在未決前面：它的用途是擋掉「把拍板過的又拿出來重想」。
+      if (hits.length && kinds.includes('settled')) settled.push(where);
       // 必讀＝提到這一章或這一章的人的段落，不管有沒有標記。
       if (hits.length) must.push(where);
     }
@@ -130,6 +141,7 @@ ${row.text}`, terms);
     prev: prev ? { title: prev.title, status: prev.status || '' } : null,
     cast: castNames,
     sections,
+    settled,
     open,
     red,
     foreshadows: openForeshadows.map((f) => ({ name: f.title || f.name || '（無標題）', status: f.status || '' })),
@@ -149,6 +161,11 @@ export function formatPrecheck(pre) {
   for (const s of pre.sections) L.push(`  ${s.doc}:${s.line}　${s.section || '（開頭）'}`);
 
   L.push('');
+  L.push(`── 已定案 ${(pre.settled || []).length} 條（不要重新考慮，也不要覆蓋）──`);
+  if (!(pre.settled || []).length) L.push('  （沒有）');
+  for (const s of pre.settled || []) L.push(`  ${s.doc}:${s.line}　${trim(s.text)}`);
+
+  L.push('');
   L.push(`── 未決 ${pre.open.length} 條（動筆前要嘛拍板，要嘛確認可以留白）──`);
   if (!pre.open.length) L.push('  （沒有）');
   for (const o of pre.open) L.push(`  ${o.doc}:${o.line}　${trim(o.text)}`);
@@ -165,11 +182,55 @@ export function formatPrecheck(pre) {
   }
 
   L.push('');
-  L.push('必讀的段落全部讀完之前不要動筆。未決的先問，不要自己決定。');
+  L.push('必讀的段落全部讀完之前不要動筆。未決的先問，不要自己決定。已定案的不要重開。');
   return L.join('\n');
 }
 
 function trim(s, n = 88) {
   const t = s.replace(/\s+/g, ' ').replace(/^[-*]\s*/, '').replace(/\*\*/g, '');
   return t.length > n ? t.slice(0, n) + '⋯' : t;
+}
+
+
+/**
+ * 全書層級的決定總帳：把所有設定文件裡的「已定案 / 未決 / 紅線」攤成一張表。
+ *
+ * precheck 是「這一章要注意什麼」；這個是「整部作品到底決定了什麼」。
+ * 用途是提任何新想法之前先查一次——**這件事是不是已經拍板過了**。
+ */
+export function buildLedger(docs = [], { kind = null, search = '' } = {}) {
+  const rows = [];
+  for (const doc of docs) {
+    for (const row of outline(doc.text)) {
+      const kinds = classify(row.text);
+      if (!kinds.length) continue;
+      if (kind && !kinds.includes(kind)) continue;
+      if (search && !`${row.section}\n${row.text}`.includes(search)) continue;
+      rows.push({ doc: doc.name, line: row.line, section: row.section, text: row.text, kinds });
+    }
+  }
+  return rows;
+}
+
+const KIND_LABEL = { settled: '定案', open: '未決', red: '紅線' };
+
+export function formatLedger(rows, { kind = null, search = '' } = {}) {
+  const L = [];
+  const what = kind ? KIND_LABEL[kind] : '決定';
+  L.push(`${what}總帳：${rows.length} 條` + (search ? `（只看含「${search}」的）` : ''));
+  if (!rows.length) {
+    L.push('（沒有符合的。設定文件裡要用「定案／已定／寫死」「未定／待定／留白」「紅線／鐵律／不准」這類字眼標記，這個指令才看得到。）');
+    return L.join('\n');
+  }
+  let lastDoc = '';
+  let lastSection = '';
+  for (const r of rows) {
+    if (r.doc !== lastDoc) { L.push(''); L.push(`【${r.doc}】`); lastDoc = r.doc; lastSection = ''; }
+    if (r.section !== lastSection) { L.push(`  ${r.section || '（開頭）'}`); lastSection = r.section; }
+    const tag = r.kinds.map((k) => KIND_LABEL[k]).join('・');
+    L.push(`    ${String(r.line).padStart(4)}  [${tag}] ${trim(r.text, 76)}`);
+  }
+  L.push('');
+  L.push('提任何新想法之前先查這裡：已定案的不要重開，未決的要問過才決定。');
+  return L.join('\n');
 }

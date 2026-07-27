@@ -40,6 +40,21 @@ node scripts/mycelium.mjs precheck 第七章
 又重新想一次、甚至覆蓋掉。判定用段落繼承——一行沒寫角色名，但它在那個角色的
 標題底下，就算他的。
 
+### `mycelium decisions`：全書決定總帳
+
+```bash
+node scripts/mycelium.mjs decisions                 # 全部
+node scripts/mycelium.mjs decisions --open          # 只看還沒拍板的
+node scripts/mycelium.mjs decisions --red           # 只看紅線
+node scripts/mycelium.mjs decisions 艾可            # 只看跟某個關鍵字有關的
+```
+
+`precheck` 是「這一章要注意什麼」，`decisions` 是「整部作品到底決定了什麼」。
+**提任何新想法之前先查一次**——這件事是不是已經拍板過了。
+
+一行只要說了「還沒決定」，就不算已定案，即使同一行也出現「寫死」（多半是「別寫死」）。
+判錯的方向要挑安全的那邊：把未決當成定案＝叫人不要再想，那是最糟的。
+
 ### `mycelium review`：審查 AI 生出來的東西
 
 ```bash
