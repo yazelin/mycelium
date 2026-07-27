@@ -14,12 +14,13 @@ import { MODES, MODE_LABEL, buildReviewModel } from './review.mjs';
 import { buildReviewHtml } from './review-page.mjs';
 import { EXTRACT_SYSTEM, buildExtractUserMessage, formatKnownEntities } from './extract-prompt.mjs';
 import { VISUAL_FIELDS, isForeshadowOverdue as isOverdue, sortChapters } from './records.mjs';
+import { buildPrecheck, formatPrecheck } from './precheck.mjs';
 import { applyCandidates, assertValidProjectData, buildProposal, validateCandidates } from './candidates.mjs';
 import {
   RECORD_TYPES, addRecord, describeRecord, diffData, editRecord, isEmptyDiff, planRemoval, removeRecord,
 } from './edits.mjs';
 import {
-  CONFIG_PATH, cacheDir, ghGetRaw, ghPutFile, localSnapshots, pullData, readCachedData,
+  CONFIG_PATH, cacheDir, ghGetRaw, ghListDir, ghPutFile, localSnapshots, pullData, readCachedData,
   readConfig, readSnapshot, remoteSnapshots, resolveRepo, timestamp, writeData, writeSnapshot,
 } from './repo.mjs';
 
@@ -79,6 +80,13 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
 
   以上都可以加 --dry-run：只算給你看，不寫任何東西。
   重複的選項可以給多次，例如 --add-alias 白衣客 --add-alias 落雨劍客。
+
+動筆前（擋門）：
+  precheck <章節關鍵字> [--docs 設定]     動筆前把該讀的攤開再寫
+                        會列三張清單：必讀（設定文件裡提到這一章或這一章的人的
+                        段落）、未決（還沒拍板的）、紅線（不准做的）。
+                        --docs 指設定文件放在作品 repo 的哪個資料夾（預設 設定）。
+                        目的是擋掉兩件事：沒讀就寫、以及把已經拍板的又拿出來重想。
 
 反悔（讓直接寫入變便宜）：
   snapshots                   列出快照（時間、各 store 筆數）
@@ -625,6 +633,43 @@ const commands = {
     console.log(`比對基準：快照 ${ts}（${snap.from}）→ 現況`);
     if (isEmptyDiff(diff)) { console.log('沒有任何差異。'); return; }
     printDiff(diff);
+  },
+
+  precheck(opts) {
+    const q = opts._.join(' ').trim();
+    if (!q) die('要給章節：precheck 第七章');
+    const repo = resolveRepo(opts);
+    const { data } = opts.cached ? { data: readCachedData(repo) } : pullData(repo);
+    if (!data) die('本機還沒有快取，先跑一次 pull。');
+
+    const chapters = sortChapters(data.chapters || []);
+    const chapter = chapters.find((c) => (c.title || '').includes(q))
+      || chapters.find((c) => String(c.order) === q);
+    if (!chapter) {
+      die(`找不到「${q}」。現有章節：\n  ` + chapters.map((c) => c.title).join('\n  '));
+    }
+
+    // 設定文件是這個指令的重點：真正的決定多半寫在 markdown 裡，不在 data/*.json。
+    const dir = opts.docs || '設定';
+    const listing = ghListDir(repo, dir);
+    if (!listing.length) {
+      console.log(`（${repo.slug} 的 ${dir}/ 底下沒有 .md，precheck 只能靠 data/*.json）`);
+    }
+    const docs = [];
+    for (const name of listing) {
+      const raw = ghGetRaw(repo, `${dir}/${name}`);
+      if (raw !== null) docs.push({ name, text: raw });
+    }
+
+    const pre = buildPrecheck({
+      chapter,
+      entities: data.entities || [],
+      relations: data.relations || [],
+      foreshadows: data.foreshadow || [],
+      chapters,
+      docs,
+    });
+    console.log(formatPrecheck(pre));
   },
 
   apply(opts) {
