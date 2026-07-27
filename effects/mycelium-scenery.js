@@ -9,6 +9,24 @@
   var reduce = global.matchMedia &&
     global.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // 讀者按 [data-fx-toggle] 關掉全站效果時，mycelium-fx.js 會把 'mycelium-fx:off'
+  // 寫進 localStorage、再翻 <html> 的 mfx-off。這裡讀的是同一把鑰匙，不另開一套開關。
+  // 不直接判斷 mfx-off class，是因為 prefers-reduced-motion 也會讓它亮，
+  // 而那一路要的是「靜態全露的背景圖」，不是「整個收掉」。
+  var OFF_KEY = 'mycelium-fx:off';
+  function userOff() {
+    try { return global.localStorage.getItem(OFF_KEY) === '1'; }
+    catch (e) { return false; }
+  }
+
+  // mfx-off 被翻動是那把鑰匙唯一會變的時機，拿它當「重讀」的訊號。
+  var syncs = [];
+  function syncAll() { for (var i = 0; i < syncs.length; i++) syncs[i](); }
+  if (global.MutationObserver) {
+    new global.MutationObserver(syncAll).observe(document.documentElement,
+      { attributes: true, attributeFilter: ['class'] });
+  }
+
   function num(el, attr, fallback, min, max) {
     var v = parseFloat(el.getAttribute(attr));
     if (isNaN(v)) return fallback;
@@ -35,25 +53,44 @@
     el._mfxBg = bg;
 
     var anchor = anchorSel && document.querySelector(anchorSel);
+    // 讀者關掉全站效果就整層收掉；背景層由這裡收而不是靠 CSS 的 .mfx-off，
+    // 因為 .mfx-off 在 reduced-motion 時也會亮，分得出這兩者的只有這支腳本。
+    function showBg() { bg.style.display = userOff() ? 'none' : ''; }
+
     // 減少動態：不是升到 rise 那個「捲到底」高度，是直接整張完全露出、無動畫。
-    if (reduce) { bg.style.setProperty('--rev', '100%'); return; }
-    if (!anchor) { bg.style.setProperty('--rev', rise + '%'); return; }
+    if (reduce) {
+      bg.style.setProperty('--rev', '100%');
+      syncs.push(showBg); showBg(); return;
+    }
+    if (!anchor) {
+      bg.style.setProperty('--rev', rise + '%');
+      syncs.push(showBg); showBg(); return;
+    }
 
     function onScroll() {
+      // 關掉的時候不只是看不見，連迫升本身都停下並歸零，重新打開才重算。
+      if (userOff()) { bg.style.setProperty('--rev', '0%'); return; }
       var r = anchor.getBoundingClientRect(), h = global.innerHeight;
       var t = Math.max(0, Math.min(1, (h - r.top) / (h * 0.8)));
       bg.style.setProperty('--rev', (t * rise).toFixed(2) + '%');
     }
     global.addEventListener('scroll', onScroll, { passive: true });
     global.addEventListener('resize', onScroll);
-    onScroll();
     el._mfxScroll = onScroll;
 
     var nMotes = num(el, 'data-fx-motes', 0, 0, 400) | 0;
     var nLeaves = num(el, 'data-fx-leaves', 0, 0, 60) | 0;
     var shade = num(el, 'data-fx-shade', 0, 0, 1) | 0;
-    if (nMotes || nLeaves) buildParticles(el, nMotes, nLeaves);
-    if (shade) buildShade(el);
+    var particles = (nMotes || nLeaves) ? buildParticles(el, nMotes, nLeaves) : null;
+    if (shade) buildShade();
+
+    syncs.push(function () {
+      showBg();
+      onScroll();
+      if (particles) particles.resume();
+    });
+    showBg();
+    onScroll();
   }
 
   function buildParticles(el, nMotes, nLeaves) {
@@ -85,10 +122,15 @@
     var i;
     for (i = 0; i < nMotes; i++) motes.push(mote(1));
     for (i = 0; i < nLeaves; i++) leaves.push(leaf(1));
-    document.addEventListener('visibilitychange', function () { run = !document.hidden; if (run) tick(); });
+    document.addEventListener('visibilitychange', function () { run = !document.hidden; resume(); });
+
+    // looping 是「這個迴圈還活著嗎」；停下來的原因有兩個（分頁背景、讀者關掉
+    // 全站效果），兩者都靠 resume() 重新接上，不會接出第二條迴圈。
+    var looping = false;
+    function resume() { if (looping || !run || userOff()) return; looping = true; tick(); }
 
     function tick() {
-      if (!run) return;
+      if (!run || userOff()) { looping = false; x.clearRect(0, 0, W, H); return; }
       t++; x.clearRect(0, 0, W, H);
       for (var k = 0; k < motes.length; k++) {
         var m = motes[k]; m.y += m.vy; m.x += Math.sin(t * 0.006 + m.gp) * 0.09;
@@ -114,10 +156,11 @@
       }
       requestAnimationFrame(tick);
     }
-    tick();
+    resume();
+    return { resume: resume };
   }
 
-  function buildShade(el) {
+  function buildShade() {
     var d = document.createElement('div');
     d.className = 'mfx-scenery-shade';
     d.setAttribute('aria-hidden', 'true');

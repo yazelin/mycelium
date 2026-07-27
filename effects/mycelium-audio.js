@@ -11,6 +11,24 @@
   var ns = global.MyceliumFX = global.MyceliumFX || {};
   var presets = {};
 
+  // 兩把鑰匙是從屬關係，不是平行的兩套開關：
+  //   'mycelium-fx:off'（mycelium-fx.js 的全站關閉開關）關掉 → 一律靜音；
+  //   它開著的時候，才輪到 'fx-bgm'（讀者只想靜音、視覺留著）決定要不要出聲。
+  // 所以全站關閉時不去動 fx-bgm，讀者重新打開效果，他原本的聲音偏好還在。
+  var OFF_KEY = 'mycelium-fx:off';
+  var BGM_KEY = 'fx-bgm';
+  function userOff() {
+    try { return global.localStorage.getItem(OFF_KEY) === '1'; }
+    catch (e) { return false; }
+  }
+  function bgmPref() {
+    try { return global.localStorage.getItem(BGM_KEY); }
+    catch (e) { return null; }
+  }
+
+  // 測試與示範頁看內部狀態用，比照 mycelium-fx.js 的 _debug()，不掛裸的全域旗標。
+  var audioStarted = false;
+
   // 內附中性預設：F 大調、76 BPM、留白多、延音長。
   presets['soft-f'] = {
     bpm: 76,
@@ -175,7 +193,7 @@
       start: function () {
         if (!ctx) build();
         if (ctx.state === 'suspended') ctx.resume();
-        global.__mfxAudioStarted = true;
+        audioStarted = true;
         engine.startAt();
         master.gain.cancelScheduledValues(ctx.currentTime);
         master.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 6);
@@ -190,14 +208,19 @@
   }
 
   // ---- loop 引擎：檔案交叉淡接（file:// 相容，用 <audio> + volume，不用 fetch/decodeAudioData） ----
+  var loopSeq = 0;
   function mountLoop(el) {
     var src = el.getAttribute('data-fx-src');
     var fade = num(el, 'data-fx-fade', 5, 1, 20);
     var VOL = 0.34;
     var A = document.createElement('audio'), B = document.createElement('audio');
     A.src = B.src = src; A.preload = B.preload = 'auto';
+    // 注入使用者頁面的東西一律 mfx- 前綴、一律帶流水號：同一頁放多個
+    // data-fx="ambient" 也不會撞 id，也不會蓋到頁面自己的 id。
+    var uid = 'mfx-audio-' + (++loopSeq);
+    A.id = uid + '-a'; B.id = uid + '-b';
+    A.className = B.className = 'mfx-audio-track';
     document.body.appendChild(A); document.body.appendChild(B);
-    A.id = A.id || 'la'; B.id = B.id || 'lb';
     var cur = A, nxt = B, on = false, env = 0, envTarget = 0, fading = false, fadeT0 = 0, raf = 0, started = false;
 
     // 波形：loop 模式只認預先算好的離線頻譜（data-fx-eqdata）；沒有這個屬性
@@ -254,7 +277,7 @@
     return {
       start: function () {
         try { cur.play(); } catch (e) {}
-        global.__mfxAudioStarted = true;
+        audioStarted = true;
         envTarget = 1; on = true;
         if (!started) { started = true; tick(); }
       },
@@ -273,32 +296,53 @@
     btn.textContent = '♪　開啟聲音'; // ♪ 開啟聲音
     document.body.appendChild(btn);
     var on = false;
-    function set(state) {
+    // persist === false：這一次的開關不是讀者的意思（是全站開關連帶造成的），
+    // 就不要覆蓋他自己那把 fx-bgm。
+    function set(state, persist) {
       on = state;
       btn.textContent = on ? '♪　聲音開啟中' : '♪　開啟聲音';
-      try { localStorage.setItem('fx-bgm', on ? '1' : '0'); } catch (e) {}
+      if (persist === false) return;
+      try { localStorage.setItem(BGM_KEY, on ? '1' : '0'); } catch (e) {}
     }
-    btn.addEventListener('click', function () { if (on) { player.stop(); set(false); } else { player.start(); set(true); } });
+    btn.addEventListener('click', function () {
+      if (userOff()) return; // 全站關閉時按鈕已經收起來，這裡是保險
+      if (on) { player.stop(); set(false); } else { player.start(); set(true); }
+    });
     setTimeout(function () { btn.classList.add('rest'); }, 10000);
     btn.addEventListener('mouseenter', function () { btn.classList.remove('rest'); });
     btn.addEventListener('mouseleave', function () { btn.classList.add('rest'); });
 
     var armed = false;
     function first() {
-      if (armed) return; armed = true;
-      var pref = null; try { pref = localStorage.getItem('fx-bgm'); } catch (e) {}
-      if (pref !== '0') { player.start(); set(true); }
+      if (armed || userOff()) return; // 全站關閉優先：連上膛都不上，之後打開再等下一個手勢
+      armed = true;
+      if (bgmPref() !== '0') { player.start(); set(true); }
     }
     ['wheel', 'touchstart', 'pointerdown', 'keydown', 'click'].forEach(function (ev) {
       global.addEventListener(ev, first, { passive: true });
     });
+
+    // mycelium-fx.js 的 setEnabled 會翻 <html> 的 mfx-off，跟著它重讀一次鑰匙：
+    // 關 → 一律靜音；開 → 交還給 fx-bgm 決定（讀者自己靜音的就繼續靜音）。
+    function syncGlobalOff() {
+      if (userOff()) { if (on) { player.stop(); set(false, false); } return; }
+      if (!on && armed && bgmPref() !== '0') { player.start(); set(true, false); }
+    }
+    if (global.MutationObserver) {
+      new global.MutationObserver(syncGlobalOff).observe(document.documentElement,
+        { attributes: true, attributeFilter: ['class'] });
+    }
   }
 
   function start() {
     var list = document.querySelectorAll('[data-fx="ambient"]');
     for (var i = 0; i < list.length; i++) attach(list[i]);
   }
-  ns.ambient = { start: start };
+  ns.ambient = {
+    start: start,
+    // 給測試與示範頁看內部狀態用（比照 mycelium-fx.js 的 _debug）
+    _debug: function () { return { started: audioStarted, off: userOff(), bgm: bgmPref() }; }
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);

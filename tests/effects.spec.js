@@ -407,7 +407,7 @@ test.describe('mycelium-fx 敘事效果庫', () => {
   test('ambient synth：未互動不出聲；一次手勢後開始，波形有動', async ({ page }) => {
     await page.goto('/effects/demo.html');
     // 未互動：沒有 running 的 audio context（模組尚未 start）
-    const before = await page.evaluate(() => window.__mfxAudioStarted === true);
+    const before = await page.evaluate(() => window.MyceliumFX.ambient._debug().started);
     expect(before).toBeFalsy();
     // 一次手勢
     await page.mouse.wheel(0, 200);
@@ -442,13 +442,14 @@ test.describe('mycelium-fx 敘事效果庫', () => {
 
     // 先確認手勢後真的開始播放——沒有放寬 autoplay 的 launch flag，
     // 這一步就是在驗證離散手勢真的有效。
-    const started = await page.evaluate(() => !document.getElementById('la').paused);
+    const started = await page.evaluate(() => !document.querySelector('.mfx-audio-track').paused);
     expect(started).toBeTruthy();
 
     const result = await page.evaluate(async () => {
       var container = document.querySelector('[data-fx="ambient"]');
       var fade = parseFloat(container.getAttribute('data-fx-fade')); // 1.2
-      var A = document.getElementById('la'), B = document.getElementById('lb');
+      var tracks = document.querySelectorAll('.mfx-audio-track');
+      var A = tracks[0], B = tracks[1];
       var cur = !A.paused ? A : B, nxt = (cur === A) ? B : A;
       var duration = cur.duration;
       // 交叉淡接從 duration-fade 開始，逼近到只差 0.3 秒，讓 tick 驅動的
@@ -496,5 +497,76 @@ test.describe('mycelium-fx 敘事效果庫', () => {
     // 淡接跑完之後：原本進來的那軌變成唯一在播的，舊軌已經暫停（真的完成了互換）。
     expect(result.after.nxtPaused).toBe(false);
     expect(result.after.curPaused).toBe(true);
+  });
+
+  test('全站關閉開關：關掉之後場景不迫升、粒子不動、雲影收掉、配樂不出聲', async ({ page }) => {
+    await page.goto('/effects/demo.html');
+    await page.waitForTimeout(300);
+
+    function probe() {
+      return page.evaluate(() => {
+        const bg = document.querySelector('.mfx-scenery-bg');
+        const c = document.querySelector('.mfx-scenery-canvas');
+        const shade = document.querySelector('.mfx-scenery-shade');
+        function ink() {
+          if (!c) return -1;
+          const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+          let n = 0;
+          for (let i = 3; i < d.length; i += 4) if (d[i] > 10) n++;
+          return n;
+        }
+        const first = ink();
+        return new Promise((res) => setTimeout(() => res({
+          rev: parseFloat(getComputedStyle(bg).getPropertyValue('--rev')),
+          bgShown: getComputedStyle(bg).display !== 'none',
+          canvasShown: c ? getComputedStyle(c).display !== 'none' : false,
+          shadeShown: shade ? getComputedStyle(shade).display !== 'none' : false,
+          particlesMoving: first !== ink(),
+          audioStarted: window.MyceliumFX.ambient._debug().started,
+          sndShown: getComputedStyle(document.querySelector('.mfx-snd')).display !== 'none',
+          sndLabel: document.querySelector('.mfx-snd').textContent,
+        }), 500));
+      });
+    }
+    const toAnchor = () => page.evaluate(() => {
+      const a = document.querySelector('[data-fx="scenery"]').getAttribute('data-fx-anchor');
+      document.querySelector(a).scrollIntoView({ block: 'start' });
+      window.scrollBy(0, window.innerHeight);
+    });
+
+    // 開著：捲過錨點會迫升、粒子在動、手勢會發聲。
+    await toAnchor();
+    await page.mouse.wheel(0, 120);
+    const on = await probe();
+    expect(on.rev).toBeGreaterThan(20);
+    expect(on.bgShown).toBe(true);
+    expect(on.particlesMoving).toBe(true);
+    expect(on.audioStarted).toBe(true);
+    expect(on.sndLabel).toContain('聲音開啟中');
+
+    // 關掉：三層都收、迫升歸零、粒子停、聲音停、開關收起來。
+    await page.evaluate(() => window.MyceliumFX.setEnabled(false));
+    await toAnchor();
+    await page.mouse.wheel(0, 200); // 關著的時候再給手勢，也不准自己播起來
+    const off = await probe();
+    expect(off.rev).toBe(0);
+    expect(off.bgShown).toBe(false);
+    expect(off.canvasShown).toBe(false);
+    expect(off.shadeShown).toBe(false);
+    expect(off.particlesMoving).toBe(false);
+    expect(off.sndShown).toBe(false);
+    expect(off.sndLabel).toContain('開啟聲音');
+    // 全站關閉不准動讀者自己那把鑰匙——重新打開時他的偏好要還在。
+    expect(await page.evaluate(() => localStorage.getItem('fx-bgm'))).toBe('1');
+
+    // 重新打開：視覺回來、粒子重新跑（同一條迴圈，不會多長一條）、聲音交還給 fx-bgm。
+    await page.evaluate(() => window.MyceliumFX.setEnabled(true));
+    await toAnchor();
+    const back = await probe();
+    expect(back.rev).toBeGreaterThan(20);
+    expect(back.bgShown).toBe(true);
+    expect(back.particlesMoving).toBe(true);
+    expect(back.sndShown).toBe(true);
+    expect(back.sndLabel).toContain('聲音開啟中');
   });
 });

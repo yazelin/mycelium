@@ -117,9 +117,17 @@ ln -s ~/mycelium/skills/mycelium ~/.claude/skills/mycelium
 場景與聲音是兩個較重的選用模組，各自獨立載入：
 
 ```html
+<script src="effects/mycelium-fx.js"></script>              <!-- 要三支一起用的話，這支放最前面 -->
 <script src="effects/mycelium-scenery.js" defer></script>   <!-- 場景背景 -->
 <script src="effects/mycelium-audio.js" defer></script>     <!-- 環境配樂 -->
 ```
+
+`mycelium-fx.js` 會直接接管 `MyceliumFX` 這個命名空間，所以它要在另外兩支之前載入，
+`MyceliumFX.scenery` 與 `MyceliumFX.ambientPreset` 才會在。只用其中一支的話沒有這個限制。
+
+這兩個模組跟既有效果一樣聽 `[data-fx-toggle]`：讀者關掉全站效果時，場景背景與環境層
+一起收掉、迫升停在 0、粒子停住，配樂一律靜音。配樂另外有自己的靜音偏好（只想關聲音、
+視覺留著），但那是從屬的：全站開關開著的時候才輪到它決定。
 
 ```html
 <!-- 場景背景：一張自帶天空的圖，捲到錨點時從底部迫升 -->
