@@ -316,15 +316,15 @@ node scripts/mycelium.mjs review --out ~/桌面/審閱 --history 80
 ### 8. 角色的視覺設定（給畫師與生圖模型）
 
 表層寫的是行為（袖子太長、走路會撞到東西），畫師要的是可畫的規格。
-一個角色可以有很多版本——第一卷的她，跟失憶之後的她，眼神就不該一樣：
+一個角色可以有很多版本——第一卷的她，跟第三卷回來的她，眼神就不該一樣：
 
 ```bash
-node scripts/mycelium.mjs edit entity 艾可 --visual 第一卷           # 先開一版，欄位留空
-node scripts/mycelium.mjs edit entity 艾可 --visual 第一卷 \
-  --appearance "身高 152，白袍過大" --outfit "神官白袍、腰間記錄簿" \
-  --palette "主色米白／副色淺灰／重點色金" --features "慣用右手、袖子蓋住手背" \
-  --prompt "young priestess, oversized white robe, ..." --visual-notes "第二卷之後眼神要換"
-node scripts/mycelium.mjs edit entity 艾可 --rm-visual 第一卷
+node scripts/mycelium.mjs edit entity 林小雨 --visual 第一卷           # 先開一版，欄位留空
+node scripts/mycelium.mjs edit entity 林小雨 --visual 第一卷 \
+  --appearance "身高 150，十七歲" --outfit "灰藍短衫、背一把太長的傘" \
+  --palette "主色灰藍／副色米白／重點色暗紅" --features "傘比人高、袖口磨破" \
+  --prompt "teenage girl, oversized umbrella, rainy town, ..." --visual-notes "第三卷之後眼神要換"
+node scripts/mycelium.mjs edit entity 林小雨 --rm-visual 第一卷
 ```
 
 版本名是必填的：不講清楚在改哪一版就會被擋下來（預設只有一版正是要避免的事）。
