@@ -14,7 +14,7 @@ import { MODES, MODE_LABEL, buildReviewModel } from './review.mjs';
 import { buildReviewHtml } from './review-page.mjs';
 import { EXTRACT_SYSTEM, buildExtractUserMessage, formatKnownEntities } from './extract-prompt.mjs';
 import { VISUAL_FIELDS, isForeshadowOverdue as isOverdue, sortChapters } from './records.mjs';
-import { buildPrecheck, formatPrecheck } from './precheck.mjs';
+import { buildLedger, buildPrecheck, formatLedger, formatPrecheck } from './precheck.mjs';
 import { applyCandidates, assertValidProjectData, buildProposal, validateCandidates } from './candidates.mjs';
 import {
   RECORD_TYPES, addRecord, describeRecord, diffData, editRecord, isEmptyDiff, planRemoval, removeRecord,
@@ -83,6 +83,7 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
 
 動筆前（擋門）：
   precheck <章節關鍵字> [--docs 設定]     動筆前把該讀的攤開再寫
+  decisions [關鍵字] [--open|--red|--settled]  全書決定總帳：拍板過的、還沒決定的、紅線
                         會列三張清單：必讀（設定文件裡提到這一章或這一章的人的
                         段落）、未決（還沒拍板的）、紅線（不准做的）。
                         --docs 指設定文件放在作品 repo 的哪個資料夾（預設 設定）。
@@ -240,6 +241,23 @@ function printDiff(diff) {
       for (const f of c.fields) console.log(`      ${f.key}：${short(f.from)} → ${short(f.to)}`);
     }
   }
+}
+
+/**
+ * 讀作品 repo 裡的設定文件（markdown）。
+ *
+ * 真正的決定多半寫在 markdown 裡，不在 data/*.json——precheck 與 decisions 都靠這個。
+ */
+function loadDocs(repo, opts, fallbackHint) {
+  const dir = opts.docs || '設定';
+  const listing = ghListDir(repo, dir);
+  if (!listing.length) console.log(`（${repo.slug} 的 ${dir}/ 底下沒有 .md，${fallbackHint}）`);
+  const docs = [];
+  for (const name of listing) {
+    const raw = ghGetRaw(repo, `${dir}/${name}`);
+    if (raw !== null) docs.push({ name, text: raw });
+  }
+  return docs;
 }
 
 const commands = {
@@ -649,17 +667,7 @@ const commands = {
       die(`找不到「${q}」。現有章節：\n  ` + chapters.map((c) => c.title).join('\n  '));
     }
 
-    // 設定文件是這個指令的重點：真正的決定多半寫在 markdown 裡，不在 data/*.json。
-    const dir = opts.docs || '設定';
-    const listing = ghListDir(repo, dir);
-    if (!listing.length) {
-      console.log(`（${repo.slug} 的 ${dir}/ 底下沒有 .md，precheck 只能靠 data/*.json）`);
-    }
-    const docs = [];
-    for (const name of listing) {
-      const raw = ghGetRaw(repo, `${dir}/${name}`);
-      if (raw !== null) docs.push({ name, text: raw });
-    }
+    const docs = loadDocs(repo, opts, 'precheck 只能靠 data/*.json');
 
     const pre = buildPrecheck({
       chapter,
@@ -670,6 +678,15 @@ const commands = {
       docs,
     });
     console.log(formatPrecheck(pre));
+  },
+
+  decisions(opts) {
+    const repo = resolveRepo(opts);
+    const kind = opts.open ? 'open' : opts.red ? 'red' : opts.settled ? 'settled' : null;
+    const search = opts._.join(' ').trim();
+    const docs = loadDocs(repo, opts, '沒有東西可以列');
+    const rows = buildLedger(docs, { kind, search });
+    console.log(formatLedger(rows, { kind, search }));
   },
 
   apply(opts) {
