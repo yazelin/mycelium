@@ -6,3 +6,6 @@ playwright-report/
 # 與底層。預設寫在本機快取目錄，這兩條是 --out 手滑寫進 repo 時的第二道防線。
 *.graph.html
 *.review.html
+
+# agent 的本機 worktree，不進版控
+.claude/
