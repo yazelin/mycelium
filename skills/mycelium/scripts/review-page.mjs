@@ -570,7 +570,7 @@ function visualBlock(e) {
     + VISUAL_FIELDS.map((f) => '  --' + f.flag + ' "…"').join(' \\\\' + NL);
   if (!list.length) {
     return '<div class="layer"><h3>視覺設定</h3>'
-      + '<p class="none">還沒有任何版本。一個角色可以有很多版（第一卷的他、失憶之後的他），每一版都是一組可以直接畫的規格：'
+      + '<p class="none">還沒有任何版本。一個角色可以有很多版（第一卷的他、第三卷回來的他），每一版都是一組可以直接畫的規格：'
       + VISUAL_FIELDS.map((f) => f.label).join('、') + '。</p>'
       + '<pre class="howto">' + esc(cmd) + '</pre></div>';
   }
