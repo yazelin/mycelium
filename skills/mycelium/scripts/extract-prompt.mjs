@@ -8,6 +8,9 @@ export const EXTRACT_SYSTEM = `你是小說設定抽取助手。輸入是既有�
 只回傳 JSON，格式：
 {"entities":[{"name":"...","aliasOf":null,"type":"...","notes":"...","reason":"..."}],"relations":[{"source":"...","target":"...","type":"...","reason":"..."}],"foreshadow":[{"title":"...","notes":"...","reason":"..."}]}
 entities 陣列裡，如果判斷是既有角色的別名，aliasOf 填該既有角色的名稱（必須完全符合既有名單裡的 name）；全新角色 aliasOf 填 null。
+既有名單裡已經有的名字（不管是本名還是別名），不要再當成全新角色列一次——那會變成同一個角色被記成兩筆。
+只有在本章補到既有角色的重要設定時才列出它：aliasOf 填 null，reason 開頭寫「補設定：」並說明補了什麼；套用時預設會略過，只有使用者明講要更新才會蓋上去。
+名字照文中與既有名單的寫法原樣抄，不要多加空白、不要改全形半形。
 只回傳 JSON，不要其他文字。`;
 
 // user message 的「既有角色名單」那一半。

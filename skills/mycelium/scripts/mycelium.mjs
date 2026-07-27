@@ -95,7 +95,8 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
   diff [<timestamp>]          現況跟快照差在哪（省略時比最近一份）
 
 寫（預設只寫提案）：
-  validate <候選檔.json>                驗證候選格式，不寫任何東西
+  validate <候選檔.json>                驗證候選格式並跟現有設定庫比對（標出哪些
+                                       是既有角色），不寫任何東西
   propose <候選檔.json> [--source ...] [--note ...] [--dry-run]
                                        寫成 repo 的 proposals/<timestamp>.json
   snapshot                             把現在的 data/*.json 存一份快照
@@ -104,6 +105,7 @@ const USAGE = `mycelium skill —— 小說設定的終端機介面
                                        一定會先自動快照）
                                        --update-existing：候選名字已存在時，
                                        改成更新既有那一筆（保留 id），而不是略過
+                                       （名字比對會忽略全形半形、空白、大小寫差異）
 
 候選檔格式（LLM 抽章節之後回傳的那一份）：
   {"entities":[{"name":"黑袍人","aliasOf":"城主","type":null,"notes":"","reason":"本章揭露城主就是黑袍人"}],
@@ -145,6 +147,45 @@ function loadData(opts) {
   }
   const { data } = pullData(repo);
   return { repo, data };
+}
+
+/** 跟 loadData 一樣，但讀不到就回 null（給「有就好」的預覽用，不該讓指令掛掉）。 */
+function tryLoadData(opts) {
+  try {
+    const repo = resolveRepo(opts);
+    if (opts.cached) {
+      const cached = readCachedData(repo);
+      return cached ? { repo, data: cached } : null;
+    }
+    const { data } = pullData(repo);
+    return data ? { repo, data } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 候選清單在人做決定之前就標出「哪些是既有角色」（#29）。
+ *
+ * 這裡不另外寫一套判斷：直接跑一次 applyCandidates（純函式，不寫任何東西）
+ * 把它的 log 印出來——預覽跟真正套用永遠是同一套規則，不會兩邊講不一樣的話。
+ */
+function printCandidatePreview(raw, opts) {
+  const loaded = tryLoadData(opts);
+  if (!loaded) {
+    console.log('（讀不到設定庫，沒辦法先比對哪些是既有角色。先跑一次 pull，或指定 --repo/--work。）');
+    return;
+  }
+  let result;
+  try {
+    result = applyCandidates(loaded.data, raw, { updateExisting: !!opts['update-existing'] });
+  } catch (e) {
+    console.log(`（無法預覽：${e.message}）`);
+    return;
+  }
+  console.log(`\n跟 ${loaded.repo.slug} 現有設定庫比對，套用之後會是：`);
+  for (const line of result.log) console.log('  - ' + line);
+  console.log('（以上只是預覽，什麼都沒寫。）');
 }
 
 function readJsonFile(path) {
@@ -496,6 +537,7 @@ const commands = {
       console.log('別名合併判斷：');
       for (const a of aliases) console.log(`  - ${a.name} → 併入「${a.aliasOf}」：${a.reason}`);
     }
+    printCandidatePreview(raw, opts);
   },
 
   propose(opts) {
@@ -513,12 +555,14 @@ const commands = {
       const local = join(dir, `${ts}.json`);
       writeFileSync(local, body, 'utf8');
       console.log(`（dry-run，沒有推上 GitHub）提案寫在本機：${local}`);
+      printCandidatePreview(raw, opts);
       return;
     }
     ghPutFile(repo, `proposals/${ts}.json`, body, `proposal ${ts}`);
     console.log(`已寫入提案：${repo.slug} 的 proposals/${ts}.json`);
     console.log(`內容：角色 ${proposal.entities.length}、關係 ${proposal.relations.length}、伏筆 ${proposal.foreshadow.length}。`);
     console.log('data/*.json 完全沒有動。逐項跟使用者確認過，再用 apply 寫進設定庫。');
+    printCandidatePreview(raw, opts);
   },
 
   snapshot(opts) {

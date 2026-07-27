@@ -4,6 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyCandidates, assertValidProjectData, buildProposal, validateCandidates } from '../scripts/candidates.mjs';
+import { nameKey, sameName } from '../scripts/records.mjs';
+import { EXTRACT_SYSTEM } from '../scripts/extract-prompt.mjs';
 
 const empty = () => ({ entities: [], relations: [], chapters: [], foreshadow: [], chatlogs: [] });
 
@@ -86,6 +88,28 @@ test('原本的 data 不會被就地改動', () => {
   const before = JSON.stringify(data);
   applyCandidates(data, { entities: [{ name: '城主', aliasOf: null, type: '人物', notes: '', reason: '新角色' }] });
   assert.equal(JSON.stringify(data), before);
+});
+
+// ── #29：名字比對的判準 ────────────────────────────────────────────────
+
+test('nameKey 把不算差異的差異抹平，該分開的仍然分開', () => {
+  assert.equal(nameKey(' 城主 '), nameKey('城主'));
+  assert.equal(nameKey('城　主'), nameKey('城主'), '全形空白不是另一個角色');
+  assert.equal(nameKey('ＬＩＮ'), nameKey('lin'), '全形與大小寫不是另一個人');
+  assert.ok(sameName('落雨劍客', '落雨劍客 '));
+  assert.ok(!sameName('城主', '副城主'), '不同名字不可以被合成一個');
+  assert.ok(!sameName('', ''), '兩個都沒填不算撞名');
+});
+
+test('自己當自己的別名，差一個空白也要擋', () => {
+  assert.throws(() => validateCandidates({
+    entities: [{ name: '城主', aliasOf: '城主 ', reason: '模型自我指涉' }],
+  }), /自己的別名/);
+});
+
+test('抽取提示詞有教模型「既有的名字不要再列一次」', () => {
+  assert.match(EXTRACT_SYSTEM, /既有名單裡已經有的名字/);
+  assert.match(EXTRACT_SYSTEM, /補設定/);
 });
 
 test('缺 reason 的候選被擋下來', () => {
