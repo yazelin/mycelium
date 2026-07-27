@@ -75,6 +75,24 @@ export function ghGetRaw(repo, path) {
   }
 }
 
+/** 列出 repo 某個資料夾底下的 .md 檔名。找不到資料夾就回空陣列。 */
+export function ghListDir(repo, dir, ext = '.md') {
+  let out;
+  try {
+    out = gh(['api', `repos/${repo.slug}/contents/${dir}`]);
+  } catch (e) {
+    if (e.notFound) return [];
+    throw e;
+  }
+  let parsed;
+  try { parsed = JSON.parse(out); } catch { return []; }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((f) => f.type === 'file' && f.name.endsWith(ext))
+    .map((f) => f.name)
+    .sort();
+}
+
 export function ghGetSha(repo, path) {
   try {
     const out = gh(['api', `repos/${repo.slug}/contents/${path}`, '--jq', '.sha']);

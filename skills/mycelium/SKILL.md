@@ -20,10 +20,37 @@ mycelium 是長篇小說的設定管理工具（設定庫、人物關係、大�
 
 | 介面 | 負責 |
 |---|---|
+| **`mycelium precheck`** | **動筆前的擋門**：這一章該讀什麼、還有什麼沒拍板、哪些紅線適用 |
 | **這個 skill（對話）** | 全部：問設定、發想、抽取、**修改** |
 | **`mycelium review`** | 審查面：使用者自己看你到底生了什麼、改了什麼 |
 | **`mycelium graph`** | 只有關係圖那一張（review 頁裡也有同一張） |
 | **使用者的編輯器** | 寫正文。mycelium 不搶這件事 |
+
+## `mycelium precheck`：動筆前先攤開
+
+```bash
+node scripts/mycelium.mjs precheck 第七章
+node scripts/mycelium.mjs precheck 第七章 --docs 設定   # 設定文件放在 repo 的哪個資料夾
+```
+
+**寫任何一章之前先跑這個。** 它解決兩個實際發生過的病：
+
+- **考慮不周就開始寫**：設定散在好幾個 markdown，你沒讀就動筆。
+  （真實案例：連續五章都只讀濃縮版，沒開過完整設定集，結果重新推導出裡面早就寫好的機制。）
+- **已做過的決定又再考慮一次**：沒有任何地方標著「這條拍板了，不要再想」，
+  於是同一件事被重新發明，甚至覆蓋掉使用者已經決定的版本。
+
+它掃作品 repo 的 `設定/*.md`（純 markdown，不需要先匯進 mycelium），對這一章列三張清單：
+
+- **必讀**：設定文件裡提到這一章、或提到這一章會出場的人的段落（檔名 + 行號 + 標題路徑）
+- **未決**：上面那些段落裡帶著「未定／待定／待建／還沒拍板／留白」的行
+- **紅線**：帶著「紅線／鐵律／不准／禁止／永不／不得」的行
+
+判定用的是**段落繼承**：一行沒有寫角色名，但它在「## 二、林小雨」底下，那就是她的。
+所以「不准讓她主動求助」不會因為沒寫名字就被漏掉。
+
+**agent 的用法**：跑完之後，把「必讀」那幾段真的讀過再動筆；「未決」的**先問使用者**，
+不要自己決定。這兩件事就是這個指令存在的全部理由。
 
 `review` 是為了一個具體的問題做的（#38）：**你生得比他看得快。**
 一天二十幾個角色、三十幾條伏筆，他來不及看；他沒看，你就會在他沒同意的前提上
@@ -289,15 +316,15 @@ node scripts/mycelium.mjs review --out ~/桌面/審閱 --history 80
 ### 8. 角色的視覺設定（給畫師與生圖模型）
 
 表層寫的是行為（袖子太長、走路會撞到東西），畫師要的是可畫的規格。
-一個角色可以有很多版本——第一卷的她，跟失憶之後的她，眼神就不該一樣：
+一個角色可以有很多版本——第一卷的她，跟第三卷回來的她，眼神就不該一樣：
 
 ```bash
-node scripts/mycelium.mjs edit entity 艾可 --visual 第一卷           # 先開一版，欄位留空
-node scripts/mycelium.mjs edit entity 艾可 --visual 第一卷 \
-  --appearance "身高 152，白袍過大" --outfit "神官白袍、腰間記錄簿" \
-  --palette "主色米白／副色淺灰／重點色金" --features "慣用右手、袖子蓋住手背" \
-  --prompt "young priestess, oversized white robe, ..." --visual-notes "第二卷之後眼神要換"
-node scripts/mycelium.mjs edit entity 艾可 --rm-visual 第一卷
+node scripts/mycelium.mjs edit entity 林小雨 --visual 第一卷           # 先開一版，欄位留空
+node scripts/mycelium.mjs edit entity 林小雨 --visual 第一卷 \
+  --appearance "身高 150，十七歲" --outfit "灰藍短衫、背一把太長的傘" \
+  --palette "主色灰藍／副色米白／重點色暗紅" --features "傘比人高、袖口磨破" \
+  --prompt "teenage girl, oversized umbrella, rainy town, ..." --visual-notes "第三卷之後眼神要換"
+node scripts/mycelium.mjs edit entity 林小雨 --rm-visual 第一卷
 ```
 
 版本名是必填的：不講清楚在改哪一版就會被擋下來（預設只有一版正是要避免的事）。
