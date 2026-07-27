@@ -15,7 +15,7 @@ import { PROJECT_STORES } from './schema.mjs';
 import {
   CHAPTER_STATUSES, FORESHADOW_STATUSES, VISUAL_FIELDS, emptyVisual,
   foreshadowReferencingChapter, foreshadowReferencingEntity, foreshadowReferencingRelation,
-  relationsAffectedByEntityDelete,
+  relationsAffectedByEntityDelete, sameName,
 } from './records.mjs';
 import { assertValidProjectData, newId } from './candidates.mjs';
 
@@ -45,6 +45,15 @@ function requireText(v, label) {
 }
 
 // ── 找紀錄 ──────────────────────────────────────────────────────────────
+
+/**
+ * 「這個名字是不是已經有主了」——本名或別名都算，比對走 nameKey，所以差一個
+ * 空白或全形半形不會漏掉（#29）。skipId 是自己那一筆（改名時不算撞到自己）。
+ */
+function findNameClash(entities, name, skipId = null) {
+  return entities.find((e) => e.id !== skipId
+    && (sameName(e.name, name) || (e.aliases || []).some((a) => sameName(a, name)))) || null;
+}
 
 function ambiguous(label, hits, nameOf) {
   return new Error(`「${label}」對到 ${hits.length} 筆：${hits.map(nameOf).join('、')}。請改用 id 指定，未變更任何資料。`);
@@ -201,7 +210,7 @@ export function editEntity(data, ref, spec = {}) {
 
   if (isDefined(spec.rename)) {
     const name = requireText(spec.rename, '角色名稱');
-    const clash = next.entities.find((e) => e.id !== existing.id && (e.name === name || (e.aliases || []).includes(name)));
+    const clash = findNameClash(next.entities, name, existing.id);
     if (clash) throw new Error(`「${name}」已經是「${clash.name}」的名稱或別名，改名會產生重複角色，未變更任何資料。`);
     updated.name = name;
     log.push(`改名：「${existing.name}」→「${name}」。`);
@@ -211,8 +220,8 @@ export function editEntity(data, ref, spec = {}) {
 
   const aliases = Array.from(updated.aliases || []);
   for (const a of asList(spec.addAlias)) {
-    if (a === updated.name) throw new Error(`「${a}」就是本名，不能同時當自己的別名，未變更任何資料。`);
-    const clash = next.entities.find((e) => e.id !== existing.id && (e.name === a || (e.aliases || []).includes(a)));
+    if (sameName(a, updated.name)) throw new Error(`「${a}」就是本名，不能同時當自己的別名，未變更任何資料。`);
+    const clash = findNameClash(next.entities, a, existing.id);
     if (clash) throw new Error(`別名「${a}」已經屬於「${clash.name}」，未變更任何資料。`);
     if (!aliases.includes(a)) { aliases.push(a); log.push(`新增別名「${a}」。`); }
   }
@@ -394,16 +403,25 @@ export function editRecord(data, type, ref, spec) {
 export function addEntity(data, spec = {}) {
   const next = cloneData(data);
   const name = requireText(spec.name, '角色名稱');
-  const clash = next.entities.find((e) => e.name === name || (e.aliases || []).includes(name));
+  const clash = findNameClash(next.entities, name);
   if (clash) {
     // #29 的同一條承諾：這個工具存在的理由就是同一個角色不能被記成兩個。
     throw new Error(`「${name}」已經存在（本名或別名屬於「${clash.name}」，id ${clash.id}）。` +
       `要補設定請用 edit entity ${clash.name}，未變更任何資料。`);
   }
+  const aliases = asList(spec.aliases);
+  for (const a of aliases) {
+    // 別名同理：新角色帶一個已經有主的別名，也是把同一個人記成兩筆。
+    if (sameName(a, name)) throw new Error(`「${a}」就是本名，不能同時當自己的別名，未變更任何資料。`);
+    const aliasClash = findNameClash(next.entities, a);
+    if (aliasClash) {
+      throw new Error(`別名「${a}」已經屬於「${aliasClash.name}」（id ${aliasClash.id}），未變更任何資料。`);
+    }
+  }
   const created = {
     id: newId('e'),
     name,
-    aliases: asList(spec.aliases),
+    aliases,
     type: isDefined(spec.type) ? String(spec.type).trim() : '',
     tags: asList(spec.tags),
     notes: isDefined(spec.notes) ? String(spec.notes) : '',

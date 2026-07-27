@@ -253,3 +253,85 @@ test('--update-existing 走就地更新，保留既有 id 與關係', () => {
   assert.equal(data.relations.length, 3);
   assert.ok(log.some((l) => l.includes('更新既有角色')));
 });
+
+// 名字比對一律走 nameKey（NFKC ＋ 去空白 ＋ 小寫）。模型吐出來的 JSON 常常
+// 多一個空白或用全形字，那不是另一個角色。
+test('候選名字多了空白或用全形字，仍然算既有角色', () => {
+  const { data, log } = applyCandidates(fixture(), {
+    entities: [
+      { name: '城主 ', aliasOf: null, type: '人物', notes: '', reason: '模型多打了一個空白' },
+      { name: '　黑袍人', aliasOf: null, type: '人物', notes: '', reason: '全形空白開頭的別名' },
+    ],
+  });
+  assert.equal(data.entities.length, 3, '不可以多出任何角色');
+  assert.equal(log.filter((l) => l.includes('未重複建立')).length, 2);
+});
+
+test('aliasOf 多了空白也找得到目標，不會退回建成獨立角色', () => {
+  const { data, log } = applyCandidates(fixture(), {
+    entities: [{ name: '灰影', aliasOf: ' 城主', type: null, notes: null, reason: '本章揭露' }],
+  });
+  assert.equal(data.entities.length, 3, '別名不該變成第四個角色');
+  assert.deepEqual(data.entities.find((e) => e.id === 'e2').aliases, ['黑袍人', '灰影']);
+  assert.ok(log.some((l) => l.includes('併為')));
+});
+
+test('存進去的名字會去掉頭尾空白', () => {
+  const { data } = applyCandidates(fixture(), {
+    entities: [{ name: ' 灰影 ', aliasOf: null, type: '人物', notes: '', reason: '新角色' }],
+  });
+  assert.ok(data.entities.some((e) => e.name === '灰影'), '不可以把空白一起存進去');
+});
+
+test('候選要把既有的獨立角色併成別名時，不自動動既有資料，只報給人處理', () => {
+  const before = fixture();
+  const { data, log } = applyCandidates(before, {
+    entities: [{ name: '落雨劍客', aliasOf: '城主', type: null, notes: null, reason: '本章揭露兩人是同一人' }],
+  });
+  assert.equal(data.entities.length, 3, '不可以多出角色');
+  assert.ok(data.entities.some((e) => e.id === 'e3'), '既有的落雨劍客不可以被吃掉');
+  assert.deepEqual(
+    data.entities.find((e) => e.id === 'e2').aliases, ['黑袍人'],
+    '不可以一邊留著獨立角色、一邊又把同一個名字掛成別名',
+  );
+  assert.ok(log.some((l) => l.includes('落雨劍客') && l.includes('獨立角色')));
+});
+
+test('同一批裡同一個名字先當新角色又當別名，只會留下別名', () => {
+  const { data, log } = applyCandidates(fixture(), {
+    entities: [
+      { name: '灰影', aliasOf: null, type: '人物', notes: '雨夜裡的影子', reason: '新角色' },
+      { name: '灰影', aliasOf: '城主', type: null, notes: null, reason: '後半章揭露就是城主' },
+    ],
+  });
+  assert.equal(data.entities.length, 3, '灰影不可以同時是角色又是別名');
+  assert.deepEqual(data.entities.find((e) => e.id === 'e2').aliases, ['黑袍人', '灰影']);
+  assert.ok(log.some((l) => l.includes('併為')));
+});
+
+test('aliasOf 找不到、但名字本來就存在時，退回的新角色不會變成分身', () => {
+  const { data, log } = applyCandidates(fixture(), {
+    entities: [{ name: '落雨劍客', aliasOf: '不存在的人', type: '人物', notes: '', reason: '模型指錯了' }],
+  });
+  assert.equal(data.entities.length, 3, '不可以退回成第四個落雨劍客');
+  assert.ok(log.some((l) => l.includes('未重複建立')));
+});
+
+test('關係端點多了空白或全形字也接得上既有角色', () => {
+  const { data } = applyCandidates(fixture(), {
+    relations: [{ source: '林小雨 ', target: '　黑袍人', type: '追殺', reason: '城主軍全境追殺林小雨' }],
+  });
+  assert.equal(data.relations.length, 4);
+  const added = data.relations[3];
+  assert.equal(added.sourceId, 'e1');
+  assert.equal(added.targetId, 'e2');
+});
+
+test('add entity 的同名判斷同樣不吃空白與全形差異', () => {
+  assert.throws(() => addEntity(fixture(), { name: '城　主' }), /已經存在/);
+  assert.throws(() => addEntity(fixture(), { name: '黑袍人 ' }), /已經存在/);
+});
+
+test('add entity 帶的別名撞到既有角色也要擋下來', () => {
+  assert.throws(() => addEntity(fixture(), { name: '灰影', aliases: '落雨劍客' }), /別名/);
+});

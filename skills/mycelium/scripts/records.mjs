@@ -11,6 +11,27 @@ export const CHAPTER_STATUSES = ['未寫', '草稿', '完稿'];
 export const FORESHADOW_STATUSES = ['埋設中', '已回收', '棄用'];
 
 /**
+ * 「這兩個名字是不是同一個角色」的唯一判準（#29）。
+ *
+ * 只用來比對，不改寫存進資料庫的字——作者寫「城　主」就存「城　主」，
+ * 但它跟「城主」是同一個人，不可以變成兩筆。
+ *
+ * 三件事：NFKC（全形英數／全形空白 → 半形）、去掉所有空白（模型吐 JSON 常常
+ * 多一個空白，那不是新角色）、小寫（拉丁名字的大小寫不是兩個人）。
+ * 名字為空（或全是空白）時回傳空字串，呼叫端要自己決定空字串不進查表。
+ */
+export function nameKey(name) {
+  if (name === undefined || name === null) return '';
+  return String(name).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+}
+
+/** 兩個名字指的是不是同一個角色。空字串永遠不算相同，避免「都沒填」被當成撞名。 */
+export function sameName(a, b) {
+  const ka = nameKey(a);
+  return ka !== '' && ka === nameKey(b);
+}
+
+/**
  * 角色的「製作層」欄位：畫師與生圖模型要的是可畫的規格，不是行為描寫。
  * 表層寫的是「袖子太長、走路會撞到東西」，那是寫小說用的；要畫出來還需要
  * 身高、髮色、配色。這幾個欄位就是那份規格。
