@@ -1,0 +1,10 @@
+import {chromium} from 'playwright';
+const b=await chromium.launch();
+const p=await b.newPage({viewport:{width:1440,height:900},deviceScaleFactor:2});
+await p.goto('http://localhost:8901/index.html',{waitUntil:'networkidle'});
+await p.evaluate(()=>{document.querySelectorAll('path[data-n]').forEach(e=>{if(e.dataset.n==='苗栗縣')e.dispatchEvent(new MouseEvent('click',{bubbles:true}))})});
+await p.waitForTimeout(1200);
+const el=await p.$('.poster');
+if(el) await el.screenshot({path:'/home/ct/.claude/jobs/9b7fea44/tmp/card.png'});
+else console.log('找不到 .poster');
+await b.close();
