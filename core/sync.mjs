@@ -27,7 +27,7 @@ export function defaultCheckPrivate(url) {
 }
 
 export async function sync(store, { remote = 'origin', branch = 'main', requirePrivate = true,
-  checkPrivate = defaultCheckPrivate } = {}) {
+  checkPrivate = defaultCheckPrivate, onFetched } = {}) {
   const dir = store.oplog.dir;
   try {
     git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
@@ -39,29 +39,47 @@ export async function sync(store, { remote = 'origin', branch = 'main', requireP
     const url = git(dir, ['remote', 'get-url', remote]).trim();
     if ((await checkPrivate(url)) !== true) throw new Error('遠端不是 private repo，拒絕推送');
   }
-  // 提交、拉回、補套在跨程序鎖內做，避免和 MCP server 的寫入交錯；推送不佔鎖。
+  // 網路抓取在鎖外做，不讓慢網路卡住 MCP 寫入；提交、合併、補套在鎖內；推送不佔鎖。
+  // fetch 會順便建立遠端追蹤分支，所以「是不是第一次」要在 fetch 前判斷
+  let firstSync = false;
+  try { git(dir, ['rev-parse', '-q', '--verify', `refs/remotes/${remote}/${branch}`]); } catch { firstSync = true; }
+  const fetched = fetchRemote(dir, remote, branch);
+  if (onFetched) onFetched();
   const locked = store.locked ?? ((fn) => fn());
-  const { applied, rebuilt } = locked(() => pullAndApply(store, dir, remote, branch));
+  const { applied, rebuilt } = locked(() => pullAndApply(store, dir, remote, branch, fetched, firstSync));
   git(dir, ['push', '-q', remote, `HEAD:${branch}`]);
   return { pulled: applied, pushed: true, rebuilt };
 }
 
-function pullAndApply(store, dir, remote, branch) {
+// 鎖外抓遠端分支；遠端還沒有該分支（第一次同步）回傳 false，其他失敗照丟。
+function fetchRemote(dir, remote, branch) {
+  try {
+    git(dir, ['fetch', '-q', remote, branch]);
+    return true;
+  } catch (e) {
+    if (/couldn't find remote ref/i.test(errText(e))) return false;
+    throw new Error(`git pull 失敗（fetch）：${errText(e)}`);
+  }
+}
+
+function pullAndApply(store, dir, remote, branch, fetched, firstSync) {
   const id = store.oplog.identity?.length ? store.oplog.identity : gitIdentityArgs(dir); // 合併 commit 也要身分
-  // 自己尚未提交的操作檔先提交，pull 才不會被未提交變更擋住
+  store.oplog.touchLock?.();
+  // 自己尚未提交的操作檔先提交，merge 才不會被未提交變更擋住
   git(dir, ['add', '--', ...store.oplog.files()]);
   if (git(dir, ['status', '--porcelain', '--', '*.jsonl']).trim()) {
     git(dir, [...id, 'commit', '-q', '-m', 'sync：提交本機操作']);
   }
-  // 只有第一次同步（從沒抓過遠端分支）才允許無共同歷史的合併
-  let firstSync = false;
-  try { git(dir, ['rev-parse', '-q', '--verify', `refs/remotes/${remote}/${branch}`]); } catch { firstSync = true; }
-  const pullArgs = [...id, 'pull', '--no-rebase', ...(firstSync ? ['--allow-unrelated-histories'] : []), '--no-edit', '-q', remote, branch];
-  try {
-    git(dir, pullArgs);
-  } catch (e) {
-    // 遠端還沒有這個分支（第一次同步）不算錯；其他失敗（含衝突）照丟，保留現場
-    if (!/couldn't find remote ref/i.test(errText(e))) throw new Error(`git pull 失敗：${errText(e)}`);
+  if (fetched) {
+    // 只有第一次同步才允許無共同歷史的合併
+    try {
+      git(dir, [...id, 'merge', '--no-edit', '-q', ...(firstSync ? ['--allow-unrelated-histories'] : []), 'FETCH_HEAD']);
+    } catch (e) {
+      throw new Error(`git pull 失敗：${errText(e)}`);
+    }
+    store.oplog.touchLock?.();
   }
-  return catchUp(store);
+  const r = catchUp(store);
+  store.oplog.touchLock?.();
+  return r;
 }

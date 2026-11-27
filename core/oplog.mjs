@@ -63,28 +63,60 @@ export class OpLog {
     }
   }
 
+  // 鎖檔內容 {pid, host, token}：釋放時憑 token 確認還是自己的鎖才刪。
+  // 殘留判定：mtime 超過 60 秒，且（同主機時）持有者 pid 已不存在。
+  isStaleLock() {
+    let st;
+    try { st = fs.statSync(this.lockPath); } catch { return false; } // 鎖剛被釋放
+    if (Date.now() - st.mtimeMs <= LOCK_STALE_MS) return false;
+    let info = null;
+    try { info = JSON.parse(fs.readFileSync(this.lockPath, 'utf8')); } catch { /* 舊格式或半寫入：只看 mtime */ }
+    if (info && info.host === os.hostname() && Number.isInteger(info.pid)) {
+      try {
+        process.kill(info.pid, 0);
+        return false; // 持有者還活著，只是很久沒更新
+      } catch (e) {
+        if (e.code === 'EPERM') return false;
+      }
+    }
+    return true;
+  }
+
+  // 更新鎖檔 mtime，讓長操作不被誤判為殘留（同步函式內跑不了 interval，由呼叫端在長操作前後手動呼叫）。
+  touchLock() {
+    if (this.lockDepth === 0) return;
+    try {
+      const now = new Date();
+      fs.utimesSync(this.lockPath, now, now);
+    } catch { /* 鎖檔不見了就算了，釋放時會警告 */ }
+  }
+
   // 跨程序鎖：多個 MCP server 與命令列 sync 可能同時用同一個 ops 目錄。可重入（同一物件內巢狀呼叫不會卡住）。
   withLock(fn) {
     if (this.lockDepth > 0) {
       this.lockDepth++;
       try { return fn(); } finally { this.lockDepth--; }
     }
-    const deadline = Date.now() + LOCK_WAIT_MS;
+    const token = ulid();
+    const deadline = Date.now() + (this.lockWaitMs ?? LOCK_WAIT_MS);
     for (;;) {
       try {
         const fd = fs.openSync(this.lockPath, 'wx');
-        fs.writeSync(fd, String(process.pid));
+        fs.writeSync(fd, JSON.stringify({ pid: process.pid, host: os.hostname(), token }));
         fs.closeSync(fd);
         break;
       } catch (e) {
         if (e.code !== 'EEXIST') throw e;
-        try {
-          if (Date.now() - fs.statSync(this.lockPath).mtimeMs > LOCK_STALE_MS) {
-            fs.rmSync(this.lockPath, { force: true });
+        if (this.isStaleLock()) {
+          // 先 rename 再刪：rename 失敗代表別人已處理，重新嘗試取得
+          const trash = `${this.lockPath}.stale-${token}`;
+          try {
+            fs.renameSync(this.lockPath, trash);
+            fs.rmSync(trash, { force: true });
             console.warn(`移除殘留的鎖檔：${this.lockPath}`);
-            continue;
-          }
-        } catch { continue; } // 鎖剛好被釋放，再試一次
+          } catch { /* 別人已處理 */ }
+          continue;
+        }
         if (Date.now() > deadline) throw new Error(`等不到操作檔的鎖（${this.lockPath}），可能有別的程序卡住`);
         pause(20 + Math.floor(Math.random() * 30));
       }
@@ -94,7 +126,10 @@ export class OpLog {
       return fn();
     } finally {
       this.lockDepth = 0;
-      fs.rmSync(this.lockPath, { force: true });
+      let mine = false;
+      try { mine = JSON.parse(fs.readFileSync(this.lockPath, 'utf8')).token === token; } catch { /* 讀不到就當不是自己的 */ }
+      if (mine) fs.rmSync(this.lockPath, { force: true });
+      else console.warn(`鎖檔已不是自己的，不刪除：${this.lockPath}`);
     }
   }
 

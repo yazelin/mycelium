@@ -198,3 +198,14 @@ test('預設就要求 private：沒指定時非 GitHub 遠端拒絕推送', asyn
   await assert.rejects(sync(a, { branch: 'main' }), /無法確認遠端是不是 private，拒絕推送/);
   assert.equal(count(), n);
 });
+
+test('fetch 階段不持鎖：onFetched 回呼裡另一個 Store 可寫入', async () => {
+  const { a, b, root } = await setup();
+  const b2 = openStore({ dbPath: path.join(root, 'b2.db'), opsDir: b.oplog.dir });
+  let wrote = false;
+  await sync(b, { branch: 'main', requirePrivate: false, onFetched: () => {
+    b2.upsertEntity(SP, { type: 'person', name: '城主' }); // 若鎖被持有會等不到鎖而丟錯
+    wrote = true;
+  } });
+  assert.equal(wrote, true);
+});

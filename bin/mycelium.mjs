@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
-import { openStore } from '../core/store.mjs';
+import { openStore, isValidOp } from '../core/store.mjs';
 import { sync, rebuild } from '../core/sync.mjs';
 import { compareOps } from '../core/apply.mjs';
 import { runMcp } from '../core/mcp.mjs';
@@ -56,7 +56,7 @@ async function main() {
       process.stdout.write(`已建立空間：${id}\n`);
     } else if (cmd === 'export') {
       const id = need('space', '--space');
-      const ops = store.oplog.readAll().filter((o) => o.space === id).sort(compareOps);
+      const ops = store.oplog.readAll().filter((o) => isValidOp(o) && o.space === id).sort(compareOps);
       process.stdout.write(ops.map((o) => JSON.stringify(o) + '\n').join(''));
     } else if (cmd === 'rebuild') {
       rebuild(store);

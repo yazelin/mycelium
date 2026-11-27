@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn as spawnFn } from 'node:child_process';
 import { OpLog, loadDevice } from '../../core/oplog.mjs';
 
 process.env.GIT_AUTHOR_NAME = '測試';
@@ -148,3 +148,85 @@ test('沒有 git 身分時也能初始化並 append（改用 mycelium 預設身�
   assert.equal(r.status, 0, r.stderr);
   assert.match(git(dir, 'log', '-1', '--format=%s'), /^op note a/);
 });
+
+// ---- 鎖檔加固 ----
+const mkLog = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lk-'));
+  return new OpLog({ dir, device: 'd1', deviceName: 'h' });
+};
+
+test('鎖檔內容含 pid、host、token', () => {
+  const log = mkLog();
+  log.withLock(() => {
+    const info = JSON.parse(fs.readFileSync(log.lockPath, 'utf8'));
+    assert.equal(info.pid, process.pid);
+    assert.equal(info.host, os.hostname());
+    assert.ok(info.token);
+  });
+  assert.equal(fs.existsSync(log.lockPath), false);
+});
+
+test('釋放時鎖已換成別人的：不刪並警告', () => {
+  const log = mkLog();
+  const warns = [];
+  const orig = console.warn; console.warn = (m) => warns.push(m);
+  try {
+    log.withLock(() => {
+      fs.writeFileSync(log.lockPath, JSON.stringify({ pid: 1, host: 'other', token: 'someone-else' }));
+    });
+  } finally { console.warn = orig; }
+  assert.ok(fs.existsSync(log.lockPath));
+  assert.equal(JSON.parse(fs.readFileSync(log.lockPath, 'utf8')).token, 'someone-else');
+  assert.ok(warns.length > 0);
+});
+
+const deadPid = () => {
+  // 取一個已結束的子程序 pid
+  const r = execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  return Number(r);
+};
+const writeStale = (log, pid) => {
+  fs.writeFileSync(log.lockPath, JSON.stringify({ pid, host: os.hostname(), token: 'old' }));
+  const old = new Date(Date.now() - 120000);
+  fs.utimesSync(log.lockPath, old, old);
+};
+
+test('殘留鎖（pid 已不存在、mtime 超過 60 秒）可被取得', () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  let got = false;
+  try { log.withLock(() => { got = true; }); } finally { console.warn = orig; }
+  assert.equal(got, true);
+  assert.equal(fs.existsSync(log.lockPath), false);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
+});
+
+test('mtime 很舊但 pid 還活著：不當殘留鎖', () => {
+  const log = mkLog();
+  writeStale(log, process.pid);
+  const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+  log2.lockWaitMs = 300;
+  assert.throws(() => log2.withLock(() => {}), /等不到/);
+});
+
+test('兩個程序同時搶殘留鎖：恰好一個先拿到，另一個等它放掉後拿到', () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  const code = `
+    import { OpLog } from ${JSON.stringify(path.resolve('core/oplog.mjs'))};
+    const l = new OpLog({ dir: process.argv[1], device: 'p'+process.pid, deviceName: 'h', autoCommit: false });
+    l.withLock(() => { const t = Date.now(); while (Date.now() - t < 300); console.log('ok'); });
+  `;
+  const { spawn } = require_cp();
+  const run = () => new Promise((res) => {
+    const c = spawn(process.execPath, ['--input-type=module', '-e', code, log.dir], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = ''; c.stdout.on('data', (d) => { out += d; });
+    c.on('close', (status) => res({ status, out }));
+  });
+  return Promise.all([run(), run()]).then((rs) => {
+    for (const r of rs) { assert.equal(r.status, 0); assert.match(r.out, /ok/); }
+    assert.equal(fs.existsSync(log.lockPath), false);
+  });
+});
+function require_cp() { return { spawn: spawnFn }; }
