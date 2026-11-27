@@ -64,7 +64,7 @@ git -C ~/.mycelium/ops remote add origin <private repo 網址>
 npx github:yazelin/mycelium sync
 ```
 
-本機分支叫什麼都可以，推送一律是 `HEAD:main`。第二台裝置用同樣的兩行指令加入同一個遠端。
+本機分支叫什麼都可以，推送一律是 `HEAD:main`。第二台裝置用同樣的兩行指令加入同一個遠端。每次推送成功後，本機會記一個同步標記（`refs/mycelium/synced`，不會推上去）。同步過的裝置遇到跟自己沒有共同歷史的遠端，會當成遠端設錯而拒絕合併，什麼都不推。
 
 ### 可見範圍
 

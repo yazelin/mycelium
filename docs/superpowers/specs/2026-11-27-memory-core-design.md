@@ -218,5 +218,6 @@
   - 鎖檔內容 `{pid, tid, host, token}`，host＝主機名＋pid namespace（Linux 讀 `/proc/self/ns/pid`，讀不到只用主機名）。
   - 同主機（host 相同）時，要 pid 已不存在，或 pid 是自己但 token 不是本程序持有（同 pid 重啟留下的），且 mtime 超過 60 秒，才算殘留；跨主機只看 mtime 超過 60 秒。
   - 移除殘留時先 rename 再核對；搬到的不是剛才判定的那把就放回（本程序已不持有的除外）。持有者釋放時連同 `.lock.stale-*` 裡自己的那份一起刪，避免被放回成孤兒鎖。
+  - 無共同歷史的合併（`--allow-unrelated-histories`）只在 `git merge-base HEAD <抓到的 ref>` 找不到共同祖先、且本機沒有同步標記 `refs/mycelium/synced` 時允許；每次推送成功後更新這個標記（只在本機，不推送）。同步過卻遇到無關歷史就拒絕合併、不推送。
   - 心跳只在 sync 的步驟前後手動 touch；長的 rebuildAll 中間不 touch。跨主機共用 ops 目錄時，超過 60 秒的重建可能被別台當成殘留搶走（已知限制）。
 - 可見範圍完全比對：`audience` 一律字串完全相同才算符合，`person:` 的對象不經 resolve。查詢的可見範圍濾網、寫入範圍的寬窄檢查（較窄不能改動較寬）、`remember` 回傳的同類事實、`upsert_entity` 候選的別名比對都用同一規則。主體與關係仍照常 resolve，所以公開事實跟著合併歸到合併後的人物，私下事實不擴散（第十三節）。`findByHandle` 回傳 `{ entityId, resolvedId }`，`person:` 標籤用 entityId；`upsert_entity` 的候選同時帶 entityId（命中的那一列）與 resolvedId，名稱、別名、全文三類一致，同一個 resolvedId 只列一次。

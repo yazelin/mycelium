@@ -27,6 +27,8 @@ export function defaultCheckPrivate(url) {
   }
 }
 
+const SYNCED_REF = 'refs/mycelium/synced';
+
 export async function sync(store, { remote = 'origin', branch = 'main', requirePrivate = true,
   checkPrivate = defaultCheckPrivate, onFetched } = {}) {
   const dir = store.oplog.dir;
@@ -52,6 +54,8 @@ export async function sync(store, { remote = 'origin', branch = 'main', requireP
   }
   const { applied, rebuilt } = out;
   git(dir, ['push', '-q', remote, `HEAD:${branch}`]);
+  // 本機的同步標記（不推送）：有它就代表這台同步成功過，之後遇到無共同歷史的遠端一律拒絕
+  git(dir, ['update-ref', SYNCED_REF, 'HEAD']);
   return { pulled: applied, pushed: true, rebuilt };
 }
 
@@ -77,10 +81,16 @@ function pullAndApply(store, dir, fetched) {
     git(dir, [...id, 'commit', '-q', '-m', 'sync：提交本機操作']);
   }
   if (fetched) {
-    // 本機與抓到的分支還沒有共同祖先（第一次同步，或上次第一次合併沒成功）才允許無共同歷史的合併；
+    // 無共同歷史的合併只在這台從沒同步成功過時允許（第一次同步，或上次第一次合併沒成功）。
+    // 同步成功過卻遇到無關歷史，多半是遠端設錯，拒絕且不推送。
     // 不看遠端追蹤分支，它在 fetch 時就會被建立，不代表合併過
     let unrelated = false;
     try { git(dir, ['merge-base', 'HEAD', fetched]); } catch { unrelated = true; }
+    if (unrelated) {
+      let synced = true;
+      try { git(dir, ['rev-parse', '-q', '--verify', SYNCED_REF]); } catch { synced = false; }
+      if (synced) throw new Error('遠端的歷史跟上次同步的不一樣，可能設錯遠端，拒絕合併');
+    }
     try {
       git(dir, [...id, 'merge', '--no-edit', '-q', ...(unrelated ? ['--allow-unrelated-histories'] : []), fetched]);
     } catch (e) {

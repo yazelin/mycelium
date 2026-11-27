@@ -238,3 +238,46 @@ test('遠端追蹤分支已存在但與遠端沒有共同歷史（上次第一�
   const names = a.db.prepare('SELECT name FROM entities ORDER BY name').all().map((r) => r.name);
   assert.deepEqual(names.sort(), ['城主', '林小雨'].sort());
 });
+
+// 換個 commit 時間開 store，初始化 commit 才不會跟別台撞成同一個
+function openAt(root, name, date) {
+  process.env.GIT_AUTHOR_DATE = process.env.GIT_COMMITTER_DATE = date;
+  try { return openStore({ dbPath: path.join(root, `${name}.db`), opsDir: path.join(root, `${name}-ops`) }); } finally {
+    delete process.env.GIT_AUTHOR_DATE; delete process.env.GIT_COMMITTER_DATE;
+  }
+}
+
+test('第二台裝置用 init＋remote add（不是 clone）加入：第一次同步成功', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-'));
+  const bare = path.join(root, 'r.git');
+  git(root, 'init', '--bare', '-q', bare);
+  const a = openAt(root, 'a', '2020-01-01T00:00:00Z');
+  git(a.oplog.dir, 'remote', 'add', 'origin', bare);
+  a.createSpace({ id: SP, name: '示範', kind: 'story', timeAxis: 'chapter' });
+  a.upsertEntity(SP, { type: 'person', name: '城主' });
+  await sync(a, { branch: 'main', requirePrivate: false });
+  const b = openAt(root, 'b', '2021-01-01T00:00:00Z');
+  git(b.oplog.dir, 'remote', 'add', 'origin', bare);
+  b.upsertEntity(SP, { type: 'person', name: '林小雨' });
+  await sync(b, { branch: 'main', requirePrivate: false });
+  await sync(a, { branch: 'main', requirePrivate: false });
+  for (const s of [a, b]) {
+    assert.deepEqual(s.db.prepare('SELECT name FROM entities ORDER BY name').all().map((r) => r.name).sort(), ['城主', '林小雨'].sort());
+  }
+});
+
+test('同步過後把 origin 改指無關的 repo：拒絕合併、不推送', async () => {
+  const { root, a } = await setup();
+  const other = path.join(root, 'other.git');
+  git(root, 'init', '--bare', '-q', other);
+  const c = openAt(root, 'c', '2019-01-01T00:00:00Z');
+  git(c.oplog.dir, 'remote', 'add', 'origin', other);
+  c.createSpace({ id: 'elsewhere', name: '別處', kind: 'story', timeAxis: 'chapter' });
+  await sync(c, { branch: 'main', requirePrivate: false });
+  const before = git(other, 'rev-parse', 'main').trim();
+  git(a.oplog.dir, 'remote', 'set-url', 'origin', other);
+  a.upsertEntity(SP, { type: 'person', name: '落雨劍客' });
+  await assert.rejects(sync(a, { branch: 'main', requirePrivate: false }), /遠端的歷史跟上次同步的不一樣，可能設錯遠端，拒絕合併/);
+  assert.equal(git(other, 'rev-parse', 'main').trim(), before);
+  assert.ok(!a.listSpaces().some((x) => x.id === 'elsewhere'));
+});
