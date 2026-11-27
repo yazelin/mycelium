@@ -379,7 +379,13 @@ test('非 Windows 的 EPERM 照丟', () => {
     if (p === log.lockPath) { const e = new Error('模擬'); e.code = 'EPERM'; throw e; }
     return realOpen(p, ...rest);
   };
-  try { assert.throws(() => log.withLock(() => {}), (e) => e.code === 'EPERM'); } finally { fs.openSync = realOpen; }
+  // 在 Windows CI 上也要驗「非 Windows」的行為，所以把平台固定成 linux
+  const plat = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...plat, value: 'linux' });
+  try { assert.throws(() => log.withLock(() => {}), (e) => e.code === 'EPERM'); } finally {
+    fs.openSync = realOpen;
+    Object.defineProperty(process, 'platform', plat);
+  }
 });
 
 test('殘留鎖搬不走（非 ENOENT）：同一把鎖只警告一次', () => {
