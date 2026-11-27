@@ -393,3 +393,35 @@ test('合併不擴散：checkWidth 不讓 person:白衣客 取代合併前 perso
   s.remember(SP, { subjectId: ids.白衣客, predicate: '暗號', objectText: '丙', validFrom: '2026-02-01',
     audience: mine, author: 't', supersedes: [priv] });
 });
+
+// ---- I3：handle 查到的 entityId 是原綁定的人物，person: 標籤用它 ----
+test('findByHandle：A 併入 B 後回 entityId=A、resolvedId=B；用 person:A 寫的私事只在 person:A 看得到', () => {
+  const { s, ids } = fresh();
+  s.addAlias(SP, ids.劍客, '@rainblade', { platform: 'line', isHandle: true });
+  s.mergeEntities(SP, ids.劍客, ids.白衣客, '本人公開聲明');
+  const h = s.findByHandle(SP, 'line', '@rainblade');
+  assert.deepEqual(h, { entityId: ids.劍客, resolvedId: ids.白衣客 });
+  assert.equal(s.findByHandle(SP, 'line', '@nobody'), null);
+  // 主體用 resolvedId，audience 用原綁定的 entityId
+  s.remember(SP, { subjectId: h.resolvedId, predicate: '私下說', objectText: '明天要去北山採藥', validFrom: '2026-01-02',
+    audience: `person:${h.entityId}`, author: 't' });
+  const seen = s.recall(SP, { text: '白衣客', audiences: ['public', `person:${ids.劍客}`] });
+  assert.ok(dump(seen).includes('明天要去北山採藥'));
+  const hidden = s.recall(SP, { text: '白衣客', audiences: ['public', `person:${ids.白衣客}`] });
+  assert.ok(!dump(hidden).includes('明天要去北山採藥'));
+});
+
+test('upsertEntity 候選帶 resolvedId，同一個 resolvedId 只列一次', () => {
+  const { s, ids } = fresh();
+  s.addAlias(SP, ids.劍客, '白衣客');
+  s.mergeEntities(SP, ids.劍客, ids.白衣客, '同一人');
+  const c = s.upsertEntity(SP, { type: 'person', name: '白衣客' });
+  const hits = c.candidates.filter((x) => x.resolvedId === ids.白衣客);
+  assert.equal(hits.length, 1);
+  for (const x of c.candidates) assert.equal(x.resolvedId, s.resolve(x.entityId));
+  // 只有別名命中的人物：entityId 保留原綁定，resolvedId 是合併後的人
+  s.addAlias(SP, ids.黑袍, '夜行者');
+  s.mergeEntities(SP, ids.黑袍, ids.城主, '同一人');
+  const c2 = s.upsertEntity(SP, { type: 'person', name: '夜行者' });
+  assert.ok(c2.candidates.some((x) => x.entityId === ids.黑袍 && x.resolvedId === ids.城主 && x.why === 'alias'));
+});

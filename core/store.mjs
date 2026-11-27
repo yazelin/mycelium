@@ -238,7 +238,11 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
       // 建立前先找可能重複的人物（名稱、看得到的別名、全文）
       const key = nameKey(name);
       const found = new Map();
-      const add = (id, nm, why) => { if (!found.has(id)) found.set(id, { entityId: id, name: nm, why }); };
+      // 候選以合併後的人（resolvedId）去重；entityId 保留命中的那一列（別名原本綁定的人物）
+      const add = (id, nm, why) => {
+        const resolvedId = resolve(id);
+        if (!found.has(resolvedId)) found.set(resolvedId, { entityId: id, resolvedId, name: nm, why });
+      };
       for (const e of all_('SELECT id, name FROM entities WHERE space = ? AND name IS NOT NULL', space)) {
         if (nameKey(e.name) === key) add(e.id, e.name, 'name');
       }
@@ -274,11 +278,13 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
       return aliasId;
     },
 
+    // 回傳 { entityId, resolvedId }：entityId＝這個 handle 原本綁定的人物，resolvedId＝合併後的人。
+    // 可見範圍 person: 標籤一律用 entityId（不跟著合併），主體與關係用 resolvedId。找不到回 null。
     findByHandle(space, platform, handle) {
       const row = get(
         `SELECT entity_id FROM aliases WHERE space = ? AND platform IS ? AND is_handle = 1 AND alias_key = ?
          ORDER BY id LIMIT 1`, space, platform ?? null, nameKey(handle));
-      return row ? resolve(row.entity_id) : null;
+      return row ? { entityId: row.entity_id, resolvedId: resolve(row.entity_id) } : null;
     },
 
     logEpisode(space, { at, source, audience, body, entityIds }) {

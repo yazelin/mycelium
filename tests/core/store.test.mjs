@@ -101,7 +101,7 @@ test('addAlias 太短丟錯；findByHandle', () => {
   const { a } = seed(s);
   assert.throws(() => s.addAlias(SP, a, '小'), /別名至少兩個字/);
   s.addAlias(SP, a, '@xiaoyu', { platform: 'line', isHandle: true });
-  assert.equal(s.findByHandle(SP, 'line', '@XiaoYu'), a);
+  assert.deepEqual(s.findByHandle(SP, 'line', '@XiaoYu'), { entityId: a, resolvedId: a });
   assert.equal(s.findByHandle(SP, 'line', '@nobody'), null);
   s.close();
 });

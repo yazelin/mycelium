@@ -84,6 +84,8 @@ npx github:yazelin/mycelium sync
 
 可見範圍標籤一律字串完全相同才算數，`person:<id>` 的 id 不經合併換算。人物 A 併入 B 之後，`person:A` 的私下紀錄仍只給 `person:A` 看，`person:B` 看不到；公開事實則照常歸到合併後的人物。
 
+所以用平台帳號認人時，`findByHandle` 回傳 `{ entityId, resolvedId }`：`entityId` 是這個帳號原本綁定的人物，`resolvedId` 是合併後的人物。`person:` 標籤一律用 `entityId`，主體與關係用 `resolvedId`。`upsert_entity` 回傳的候選也同時帶 `entityId`（命中的那一列）與 `resolvedId`，同一個合併後的人物只列一次。
+
 已知限制：人物名稱、摘要與合併視為公開資訊。私下得知的同一人關係，請用 `person:` 標籤的事實來記，不要寫進人物摘要或合併。
 
 ### English summary
