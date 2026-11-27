@@ -187,7 +187,7 @@
 - 未來方向（不在本設計範圍）：公司內部系統的記憶（知識庫、ERP 客戶與訂單、LINE bot 紀錄）也用這套管理，讓 AI 查得到人、事、物與時間線的關聯，再自行推論出洞見。公司內部系統 是 Python，可透過 MCP／HTTP 呼叫，或直接讀操作紀錄（每行一筆 JSON）。屆時另寫設計：群組與角色權限怎麼對應 公司內部系統 既有的三層權限、資料量與來源的匯入方式。
 - 已知限制：實體（人物）的名稱、摘要與合併視為公開資訊，不帶 audience；只有別名（alias）帶 audience。私下得知的同一人關係（例如「甲其實就是乙」）不寫進摘要或合併，改用帶 `person:<id>` 標籤的事實記錄。
 - 寫入也照可見範圍（2026-11-27 總審查後補）：
-  - 較窄的範圍不能改動較寬的事實：寫入範圍為 W、被取代或失效的事實範圍為 T，只有 W＝T（`person:` 經 resolve 後比）或 W＝`public` 才允許，否則拒絕且不寫入。`invalidate` 加選用 `audience`（預設 `public`）。
+  - 較窄的範圍不能改動較寬的事實：寫入範圍為 W、被取代或失效的事實範圍為 T，只有 W＝T（字串完全相同，`person:` 不經 resolve）或 W＝`public` 才允許，否則拒絕且不寫入。`invalidate` 加選用 `audience`（預設 `public`）。
   - `remember` 回傳的同類仍成立事實，主體用 resolve 後的人比對，只回傳 `public` 或與這次寫入同一範圍的。
   - `upsert_entity` 加選用 `audiences`（預設 `['public']`），重複候選只比對看得到的別名。
   - 查詢輸出的 `superseded_by`、`source_episode`、`object_fact` 指向看不到的紀錄時清成 null（只清輸出，不動資料庫）。
@@ -215,4 +215,8 @@
 
 - 壞操作略過：操作紀錄裡格式不合的行或欄位不全的操作，重建時略過並警告，不讓整次重建失敗；正常的操作照常套用。
 - 鎖與同步：鎖檔記錄持有者與一次性的憑證，釋放時只刪自己的鎖，殘留超過時限的鎖才會被移除；同步的 fetch 移到鎖外，抓到每次唯一的暫時 ref，只在合併進本機操作時才持鎖。
+  - 鎖檔內容 `{pid, tid, host, token}`，host＝主機名＋pid namespace（Linux 讀 `/proc/self/ns/pid`，讀不到只用主機名）。
+  - 同主機（host 相同）時，要 pid 已不存在，或 pid 是自己但 token 不是本程序持有（同 pid 重啟留下的），且 mtime 超過 60 秒，才算殘留；跨主機只看 mtime 超過 60 秒。
+  - 移除殘留時先 rename 再核對；搬到的不是剛才判定的那把就放回（本程序已不持有的除外）。持有者釋放時連同 `.lock.stale-*` 裡自己的那份一起刪，避免被放回成孤兒鎖。
+  - 心跳只在 sync 的步驟前後手動 touch；長的 rebuildAll 中間不 touch。跨主機共用 ops 目錄時，超過 60 秒的重建可能被別台當成殘留搶走（已知限制）。
 - 可見範圍完全比對：`audience` 一律字串完全相同才算符合，`person:` 的對象不經 resolve。查詢的可見範圍濾網、寫入範圍的寬窄檢查（較窄不能改動較寬）、`remember` 回傳的同類事實、`upsert_entity` 候選的別名比對都用同一規則。主體與關係仍照常 resolve，所以公開事實跟著合併歸到合併後的人物，私下事實不擴散（第十三節）。`findByHandle` 回傳 `{ entityId, resolvedId }`，`person:` 標籤用 entityId；`upsert_entity` 的候選同時帶 entityId（命中的那一列）與 resolvedId，名稱、別名、全文三類一致，同一個 resolvedId 只列一次。
