@@ -26,7 +26,7 @@ export function defaultCheckPrivate(url) {
   }
 }
 
-export async function sync(store, { remote = 'origin', branch = 'main', requirePrivate = false,
+export async function sync(store, { remote = 'origin', branch = 'main', requirePrivate = true,
   checkPrivate = defaultCheckPrivate } = {}) {
   const dir = store.oplog.dir;
   try {

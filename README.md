@@ -46,7 +46,7 @@ claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp
 | `sync` | 與 git 遠端同步操作紀錄 |
 | `rebuild` | 從操作紀錄重建 SQLite 資料庫 |
 
-`sync` 可加 `--require-private`：遠端不是 private repo 就拒絕推送。這個檢查只認得 GitHub 遠端，並且要先用 `gh auth login` 登入；其他主機一律拒絕。
+`sync` 預設只推到 private repo：遠端不是 private 就拒絕推送，因為操作紀錄裡可能有私下得知的事。這個檢查只認得 GitHub 遠端，要先用 `gh auth login` 登入；其他主機一律拒絕。確定要推到公開 repo 或非 GitHub 主機時，加 `--allow-public`。
 
 ### 同步怎麼運作
 
@@ -61,7 +61,7 @@ claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp
 ```bash
 # 先在 GitHub 建一個 private repo（空的即可），再把它設成 origin
 git -C ~/.mycelium/ops remote add origin <private repo 網址>
-npx github:yazelin/mycelium sync --require-private
+npx github:yazelin/mycelium sync
 ```
 
 本機分支叫什麼都可以，推送一律是 `HEAD:main`。第二台裝置用同樣的兩行指令加入同一個遠端。

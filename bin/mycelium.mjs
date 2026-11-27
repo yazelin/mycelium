@@ -16,7 +16,7 @@ const USAGE = `用法：mycelium <指令> [選項]
   export --space <id>                                                     把該空間的操作以 JSONL 印出
   sync                                                                    與 git 遠端同步
   rebuild                                                                 從操作紀錄重建資料庫
-共用選項：--db <路徑>（預設 ~/.mycelium/mycelium.db）、--ops <目錄>（預設 ~/.mycelium/ops）、--require-private`;
+共用選項：--db <路徑>（預設 ~/.mycelium/mycelium.db）、--ops <目錄>（預設 ~/.mycelium/ops）、--allow-public（sync 預設只推 private repo；要推公開 repo 才加）`;
 
 function usageExit() {
   process.stderr.write(USAGE + '\n');
@@ -29,7 +29,7 @@ async function main() {
   let values;
   try {
     ({ values } = parseArgs({ args: rest, options: {
-      db: { type: 'string' }, ops: { type: 'string' }, 'require-private': { type: 'boolean' },
+      db: { type: 'string' }, ops: { type: 'string' }, 'require-private': { type: 'boolean' }, 'allow-public': { type: 'boolean' },
       space: { type: 'string' }, name: { type: 'string' }, kind: { type: 'string' }, axis: { type: 'string' },
     } }));
   } catch (e) {
@@ -63,7 +63,7 @@ async function main() {
       process.stdout.write('已重建資料庫\n');
     } else if (cmd === 'sync') {
       try {
-        const r = await sync(store, { requirePrivate: values['require-private'] ?? false });
+        const r = await sync(store, { requirePrivate: !values['allow-public'] });
         process.stdout.write(`同步完成：拉回 ${r.pulled} 筆，已推送\n`);
       } catch (e) {
         process.stderr.write(`同步失敗：${String(e.message).trim()}\n`);
