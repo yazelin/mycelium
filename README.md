@@ -30,6 +30,54 @@ npx github:yazelin/mycelium init --space demo --name 示範 --kind story --axis 
 claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp
 ```
 
+### 給 AI 的安裝說明
+
+使用者說「照 github.com/yazelin/mycelium 的 AI 安裝說明幫我裝好」時，AI coding agent 照下面的步驟做。這個套件沒有發佈到 npm，一律用 `npx -y github:yazelin/mycelium <指令>` 執行。
+
+1. 檢查環境：跑 `node -v` 與 `git --version`。Node 要 22.13 以上，git 要裝好。Node 版本太舊時，告訴使用者怎麼升級，然後停下來等他升級完：
+   - 有 nvm：`nvm install 22`、`nvm use 22`
+   - Windows：`winget install OpenJS.NodeJS.LTS`
+   - macOS：`brew install node`
+   - 其他：到 https://nodejs.org 下載 LTS 安裝檔
+2. 註冊 MCP server。先判斷自己是哪一種客戶端：
+   - Claude Code：
+     ```bash
+     claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp
+     ```
+   - Codex：在 `~/.codex/config.toml` 加上（範例）
+     ```toml
+     [mcp_servers.mycelium]
+     command = "npx"
+     args = ["-y", "github:yazelin/mycelium", "mcp"]
+     ```
+   - Cursor 與其他用 JSON 設定 MCP 的客戶端：在設定檔（Cursor 是 `~/.cursor/mcp.json`）的 `mcpServers` 加上（範例）
+     ```json
+     { "mcpServers": { "mycelium": { "command": "npx", "args": ["-y", "github:yazelin/mycelium", "mcp"] } } }
+     ```
+   - 認不出來的客戶端：把啟動指令 `npx -y github:yazelin/mycelium mcp`（stdio）給使用者，請他照自己客戶端的方式加。
+
+   Codex 與 Cursor 的設定格式以各客戶端的文件為準。
+3. 建立記憶空間。跟使用者確認空間 id 與顯示名稱，再跑：
+   ```bash
+   npx -y github:yazelin/mycelium init --space <空間 id> --name <顯示名> --kind social --axis date
+   ```
+   記人際往來用 `social`＋`date`；記小說設定用 `--kind story --axis chapter`。
+4. 冒煙測試。客戶端要重新啟動才載得到新的 MCP server；這一輪對話裡還叫不到 mycelium 的工具，就請使用者重開，再接著做。測試資料寫在另一個空間，不弄髒使用者的空間：
+   1. `npx -y github:yazelin/mycelium init --space install-check --name 安裝測試 --kind social --axis date`
+   2. 呼叫 `upsert_entity`：`{ "space": "install-check", "type": "person", "name": "林小雨" }`，記下回傳的 `entityId`
+   3. 呼叫 `remember`：`{ "space": "install-check", "subjectId": "<entityId>", "predicate": "狀態", "objectText": "安裝測試成功", "validFrom": "<今天的 YYYY-MM-DD>", "audience": "public", "author": "install-check" }`
+   4. 呼叫 `recall`：`{ "space": "install-check", "names": ["林小雨"], "audiences": ["public"] }`，回傳的 `text` 裡要有「安裝測試成功」
+
+   把每一步的結果回報給使用者，並告訴他 `install-check` 這個空間留著不影響其他空間。
+5. 問使用者要不要跨裝置同步。要的話：
+   1. 在 GitHub 建一個 **private** repo（空的即可），例如 `gh repo create <名稱> --private`
+   2. `git -C ~/.mycelium/ops remote add origin <repo 網址>`
+   3. `gh auth login`（`sync` 要用 gh 確認遠端是 private，預設只推 private repo）
+   4. `npx -y github:yazelin/mycelium sync`
+
+   第二台裝置照第 1 到 3 步裝好，再做這裡的第 2 到 4 步，就會接上同一個遠端。
+6. 提醒使用者可見範圍怎麼用：`recall` 等查詢工具一定要帶 `audiences`，公開場合只給 `['public']`。私下得知的事寫成 `audience: 'person:<id>'`，這個 id 用平台帳號原本綁定的人物（`findByHandle` 回傳的 `entityId`），不用合併後的人物。
+
 ### 資料放哪
 
 - 資料庫：`~/.mycelium/mycelium.db`（SQLite，可隨時重建）
@@ -91,6 +139,8 @@ npx github:yazelin/mycelium sync
 ### English summary
 
 The memory core is a zero-dependency (Node 22.13+) relational memory for AI agents: people, events and things, with relations that change over time. Everything stays on your own machine, in a SQLite cache rebuilt from append-only JSONL operation logs. Each device appends only to its own `ops/<device>.jsonl`, so syncing through git never conflicts. Facts carry an `audience` label (`public`, `person:<id>`, `group:`, `role:`), and recall requires the caller's audiences. A narrower audience can never supersede or invalidate a broader fact (only the same audience or `public` can). `person:` labels match exactly and do not follow merges; use the id bound to the handle. Entity names, summaries and merges are treated as public. Run it with `npx github:yazelin/mycelium <command>` and connect Claude Code with `claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp`.
+
+**Install guide for AI agents.** When a user asks you to install mycelium by following this README, do the steps in 「給 AI 的安裝說明」 above: check `node -v` (22.13+) and `git --version` and stop with upgrade instructions if Node is too old; register the MCP server for your client (Claude Code: `claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp`; Codex and JSON-config clients such as Cursor: command `npx`, args `["-y", "github:yazelin/mycelium", "mcp"]`, shown as examples); run `npx -y github:yazelin/mycelium init --space <id> --name <name> --kind social --axis date` (or `story`/`chapter` for novels); smoke-test in a separate `install-check` space with `upsert_entity`, `remember` and `recall` using audiences `['public']`; then offer cross-device sync through a private GitHub repo (`git -C ~/.mycelium/ops remote add origin <url>`, `gh auth login`, `sync`). The package is not on npm; always use `npx -y github:yazelin/mycelium`. Recall always needs audiences, and private facts use `person:<id>` with the entity originally bound to the handle.
 
 ---
 
