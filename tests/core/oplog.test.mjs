@@ -53,11 +53,17 @@ test('最後一行不完整：略過並警告，不丟錯', () => {
   assert.deepEqual(warns, ['略過不完整的最後一行：pc-DEV1.jsonl']);
 });
 
-test('中間行壞掉：丟錯，訊息含檔名與行號', () => {
+test('中間行壞掉：略過該行並警告含檔名與行號，回傳其餘各行', () => {
   const dir = tmp();
   const log = mk(dir);
-  fs.writeFileSync(path.join(dir, 'pc-DEV1.jsonl'), JSON.stringify(op('a')) + '\n{壞掉\n' + JSON.stringify(op('c')) + '\n');
-  assert.throws(() => log.readAll(), (e) => e.message.includes('pc-DEV1.jsonl') && e.message.includes('第 2 行'));
+  fs.writeFileSync(path.join(dir, 'pc-DEV1.jsonl'), JSON.stringify(op('a')) + '\n{壞\n' + JSON.stringify(op('c')) + '\n');
+  const warns = [];
+  const orig = console.warn;
+  console.warn = (m) => warns.push(m);
+  try {
+    assert.deepEqual(log.readAll().map((o) => o.id), ['a', 'c']);
+  } finally { console.warn = orig; }
+  assert.deepEqual(warns, ['略過無法解析的操作：pc-DEV1.jsonl 第 2 行']);
 });
 
 test('讀取多個裝置的檔、略過空行', () => {

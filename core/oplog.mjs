@@ -149,7 +149,7 @@ export class OpLog {
           if (i === last) {
             console.warn(`略過不完整的最後一行：${name}`);
           } else {
-            throw new Error(`操作檔 ${name} 第 ${i + 1} 行無法解析：${e.message}`);
+            console.warn(`略過無法解析的操作：${name} 第 ${i + 1} 行`);
           }
         }
       });

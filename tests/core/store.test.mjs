@@ -387,3 +387,34 @@ test('mergeEntities 兩邊要在同一個空間', () => {
   assert.throws(() => s.mergeEntities(SP, a, 'nobody', '同一人'), /找不到人物/);
   s.close();
 });
+
+test('格式不合的操作行：開啟不丟錯、資料都在、各警告一次、重開不重建', () => {
+  const cfg = mkdirs();
+  const s = openStore(cfg);
+  const { a } = seed(s);
+  s.close();
+  const file = fs.readdirSync(cfg.opsDir).find((f) => f.endsWith('.jsonl'));
+  fs.appendFileSync(path.join(cfg.opsDir, file), [
+    '{"id":"x","hlc":"garbage","type":"create_entity","space":"demo","data":{}}',
+    'null',
+    '{"hlc":"0000000000001-0000-dev","type":"create_entity"}',
+    '',
+  ].join('\n'));
+  const warns = [];
+  const orig = console.warn;
+  console.warn = (m) => warns.push(String(m));
+  let s2;
+  try {
+    s2 = openStore(cfg);
+  } finally { console.warn = orig; }
+  assert.equal(s2.db.prepare('SELECT name FROM entities WHERE id=?').get(a).name, '林小雨');
+  assert.equal(warns.filter((m) => m.startsWith('略過格式不合的操作')).length, 3);
+  assert.ok(warns.includes('略過格式不合的操作：x'));
+  assert.ok(warns.includes('略過格式不合的操作：(無 id)'));
+  const n = s2.db.prepare('SELECT COUNT(*) c FROM applied').get().c;
+  s2.close();
+  const s3 = openStore(cfg);
+  assert.equal(s3.db.prepare('SELECT COUNT(*) c FROM applied').get().c, n);
+  assert.equal(s3.db.prepare('SELECT name FROM entities WHERE id=?').get(a).name, '林小雨');
+  s3.close();
+});

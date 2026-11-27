@@ -11,6 +11,24 @@ import { attachQueries } from './query.mjs';
 const AUDIENCE_RE = /^(public|(person|group|role):.+)$/u;
 const TABLES = ['spaces', 'entities', 'aliases', 'facts', 'episodes', 'merges', 'overwrites', 'applied', 'fts'];
 
+// 操作的最低格式：物件、id 為非空字串、hlc 為「13 位毫秒-4 位計數-裝置」、type 為字串。
+// 只看操作本身，每台裝置判斷一致。
+export function isValidOp(op) {
+  return op !== null && typeof op === 'object' && !Array.isArray(op)
+    && typeof op.id === 'string' && op.id !== ''
+    && typeof op.hlc === 'string' && /^\d{13}-\d{4}-.+$/.test(op.hlc)
+    && typeof op.type === 'string';
+}
+
+// 濾掉格式不合的操作並逐筆警告。
+function validOps(ops) {
+  return ops.filter((op) => {
+    if (isValidOp(op)) return true;
+    console.warn(`略過格式不合的操作：${typeof op?.id === 'string' && op.id !== '' ? op.id : '(無 id)'}`);
+    return false;
+  });
+}
+
 // 清空所有由操作衍生的資料表後，依 (hlc, dev, id) 排序重播全部操作。
 // vectors 不是操作衍生的（由嵌入流程另外寫入），保留不動。
 // 整個清空＋重播包在一個交易（SAVEPOINT，可巢狀在外層交易裡）；失敗就回滾，舊資料保留。
@@ -18,7 +36,7 @@ export function rebuildAll(db, ops) {
   db.exec('SAVEPOINT rebuild_all');
   try {
     for (const t of TABLES) db.exec(`DELETE FROM ${t}`);
-    for (const op of [...ops].sort(compareOps)) replayOp(db, op);
+    for (const op of ops.filter(isValidOp).sort(compareOps)) replayOp(db, op);
     db.exec('RELEASE rebuild_all');
   } catch (e) {
     db.exec('ROLLBACK TO rebuild_all');
@@ -44,8 +62,8 @@ export function replayOp(db, op) {
 // 同時讓混合時鐘觀察所有操作的 hlc。回傳 {applied, rebuilt}。
 export function catchUp({ db, oplog, hlc }) {
   if (!hlc) throw new Error('catchUp 需要混合時鐘 hlc');
-  const all = oplog.readAll();
-  for (const op of all) if (op.hlc) hlc.observe(op.hlc);
+  const all = validOps(oplog.readAll());
+  for (const op of all) hlc.observe(op.hlc);
   const appliedIds = new Set(db.prepare('SELECT op_id FROM applied').all().map((r) => r.op_id));
   // 資料庫裡有主本沒有的已套用操作（例如搭配了別的 ops 目錄）：資料庫不可信，整個重建
   const known = new Set(all.map((op) => String(op.id)));
