@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: 'tests',
+  // tests/core 是記憶核心的 node:test 測試（要 Node 22.13 以上的 node:sqlite），
+  // 由 core.yml 另外跑；playwright 只跑瀏覽器測試。
+  testIgnore: ['core/**'],
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'list' : [['list']],
