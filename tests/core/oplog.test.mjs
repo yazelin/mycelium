@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawn as spawnFn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { OpLog, loadDevice } from '../../core/oplog.mjs';
 
 process.env.GIT_AUTHOR_NAME = '測試';
@@ -210,23 +210,51 @@ test('mtime 很舊但 pid 還活著：不當殘留鎖', () => {
   assert.throws(() => log2.withLock(() => {}), /等不到/);
 });
 
-test('兩個程序同時搶殘留鎖：恰好一個先拿到，另一個等它放掉後拿到', () => {
+test('兩個程序同時搶殘留鎖：臨界區不重疊，兩邊都拿到', async () => {
   const log = mkLog();
   writeStale(log, deadPid());
+  const mark = path.join(log.dir, 'marks.txt');
   const code = `
-    import { OpLog } from ${JSON.stringify(path.resolve('core/oplog.mjs'))};
-    const l = new OpLog({ dir: process.argv[1], device: 'p'+process.pid, deviceName: 'h', autoCommit: false });
-    l.withLock(() => { const t = Date.now(); while (Date.now() - t < 300); console.log('ok'); });
+    import fs from 'node:fs';
+    import { OpLog } from ${JSON.stringify(new URL('../../core/oplog.mjs', import.meta.url).href)};
+    const l = new OpLog({ dir: process.argv[1], device: 'p' + process.pid, deviceName: 'h', autoCommit: false });
+    l.withLock(() => {
+      fs.appendFileSync(process.argv[2], 'in ' + process.pid + ' ' + Date.now() + '\\n');
+      const t = Date.now(); while (Date.now() - t < 300);
+      fs.appendFileSync(process.argv[2], 'out ' + process.pid + ' ' + Date.now() + '\\n');
+    });
   `;
-  const { spawn } = require_cp();
   const run = () => new Promise((res) => {
-    const c = spawn(process.execPath, ['--input-type=module', '-e', code, log.dir], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = ''; c.stdout.on('data', (d) => { out += d; });
-    c.on('close', (status) => res({ status, out }));
+    const c = spawn(process.execPath, ['--input-type=module', '-e', code, log.dir, mark], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = ''; c.stderr.on('data', (d) => { err += d; });
+    c.on('close', (status) => res({ status, err }));
   });
-  return Promise.all([run(), run()]).then((rs) => {
-    for (const r of rs) { assert.equal(r.status, 0); assert.match(r.out, /ok/); }
-    assert.equal(fs.existsSync(log.lockPath), false);
-  });
+  const rs = await Promise.all([run(), run()]);
+  for (const r of rs) assert.equal(r.status, 0, r.err);
+  const lines = fs.readFileSync(mark, 'utf8').trim().split('\n').map((l) => l.split(' '));
+  assert.equal(lines.length, 4);
+  // 事件依時間排序後必須是 in,out,in,out（同一程序配對），不可交錯
+  const ev = lines.map(([k, pid, t]) => ({ k, pid, t: Number(t) })).sort((x, y) => x.t - y.t || (x.k === 'out' ? -1 : 1));
+  assert.deepEqual(ev.map((e) => e.k), ['in', 'out', 'in', 'out']);
+  assert.equal(ev[0].pid, ev[1].pid);
+  assert.equal(ev[2].pid, ev[3].pid);
+  assert.equal(fs.existsSync(log.lockPath), false);
 });
-function require_cp() { return { spawn: spawnFn }; }
+
+test('判定殘留後、移除前鎖被換成新鎖：新鎖不被刪，原持有者仍持有', () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+  log2.lockWaitMs = 300;
+  const fresh = JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'fresh-owner' });
+  let swapped = false;
+  log2.onStaleJudged = () => {
+    if (swapped) return;
+    swapped = true;
+    fs.rmSync(log.lockPath);
+    fs.writeFileSync(log.lockPath, fresh); // 別人剛拿到鎖
+  };
+  assert.throws(() => log2.withLock(() => assert.fail('不該進入臨界區')), /等不到/);
+  assert.equal(fs.readFileSync(log.lockPath, 'utf8'), fresh);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
+});

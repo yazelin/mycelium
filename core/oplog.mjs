@@ -65,27 +65,56 @@ export class OpLog {
 
   // 鎖檔內容 {pid, host, token}：釋放時憑 token 確認還是自己的鎖才刪。
   // 殘留判定：mtime 超過 60 秒，且（同主機時）持有者 pid 已不存在。
-  isStaleLock() {
+  // 判定為殘留時回傳當時看到的 {token, mtimeMs}，供移除時確認沒被換掉；否則回傳 null。
+  staleObservation() {
     let st;
-    try { st = fs.statSync(this.lockPath); } catch { return false; } // 鎖剛被釋放
-    if (Date.now() - st.mtimeMs <= LOCK_STALE_MS) return false;
+    try { st = fs.statSync(this.lockPath); } catch { return null; } // 鎖剛被釋放
+    if (Date.now() - st.mtimeMs <= LOCK_STALE_MS) return null;
     let info = null;
     try { info = JSON.parse(fs.readFileSync(this.lockPath, 'utf8')); } catch { /* 舊格式或半寫入：只看 mtime */ }
     if (info && info.host === os.hostname() && Number.isInteger(info.pid)) {
       try {
         process.kill(info.pid, 0);
-        return false; // 持有者還活著，只是很久沒更新
+        return null; // 持有者還活著，只是很久沒更新
       } catch (e) {
-        if (e.code === 'EPERM') return false;
+        if (e.code === 'EPERM') return null;
       }
     }
-    return true;
+    return { token: info?.token ?? null, mtimeMs: st.mtimeMs };
+  }
+
+  // 把判定為殘留的鎖移走。rename 之後再核對一次：搬走的若不是剛才判定的那把（被別人換成新鎖），
+  // 就用 link 放回去（已有人重建鎖則 link 失敗，保持現狀），不刪。
+  removeStale(seen, token) {
+    const trash = `${this.lockPath}.stale-${token}`;
+    try {
+      fs.renameSync(this.lockPath, trash);
+    } catch (e) {
+      if (e.code === 'ENOENT') return; // 別人已處理
+      console.warn(`無法移除殘留的鎖檔（${e.code}）：${this.lockPath}`);
+      return;
+    }
+    let same = false;
+    try {
+      const info = JSON.parse(fs.readFileSync(trash, 'utf8'));
+      same = info.token === seen.token;
+    } catch {
+      same = seen.token === null && fs.statSync(trash).mtimeMs === seen.mtimeMs;
+    }
+    if (same) {
+      fs.rmSync(trash, { force: true });
+      console.warn(`移除殘留的鎖檔：${this.lockPath}`);
+      return;
+    }
+    try { fs.linkSync(trash, this.lockPath); } catch { /* 已有人重建鎖：不動它 */ }
+    fs.rmSync(trash, { force: true });
   }
 
   // 更新鎖檔 mtime，讓長操作不被誤判為殘留（同步函式內跑不了 interval，由呼叫端在長操作前後手動呼叫）。
   touchLock() {
     if (this.lockDepth === 0) return;
     try {
+      if (JSON.parse(fs.readFileSync(this.lockPath, 'utf8')).token !== this.lockToken) return;
       const now = new Date();
       fs.utimesSync(this.lockPath, now, now);
     } catch { /* 鎖檔不見了就算了，釋放時會警告 */ }
@@ -107,21 +136,17 @@ export class OpLog {
         break;
       } catch (e) {
         if (e.code !== 'EEXIST') throw e;
-        if (this.isStaleLock()) {
-          // 先 rename 再刪：rename 失敗代表別人已處理，重新嘗試取得
-          const trash = `${this.lockPath}.stale-${token}`;
-          try {
-            fs.renameSync(this.lockPath, trash);
-            fs.rmSync(trash, { force: true });
-            console.warn(`移除殘留的鎖檔：${this.lockPath}`);
-          } catch { /* 別人已處理 */ }
-          continue;
+        const seen = this.staleObservation();
+        if (seen) {
+          this.onStaleJudged?.(); // 測試用：在判定與移除之間插入動作
+          this.removeStale(seen, token);
         }
         if (Date.now() > deadline) throw new Error(`等不到操作檔的鎖（${this.lockPath}），可能有別的程序卡住`);
         pause(20 + Math.floor(Math.random() * 30));
       }
     }
     this.lockDepth = 1;
+    this.lockToken = token;
     try {
       return fn();
     } finally {
