@@ -11,6 +11,24 @@ import { attachQueries } from './query.mjs';
 const AUDIENCE_RE = /^(public|(person|group|role):.+)$/u;
 const TABLES = ['spaces', 'entities', 'aliases', 'facts', 'episodes', 'merges', 'overwrites', 'applied', 'fts'];
 
+// 操作的最低格式：物件、id 為非空字串、hlc 為「13 位毫秒-4 位計數-裝置」、type 為字串。
+// 只看操作本身，每台裝置判斷一致。
+export function isValidOp(op) {
+  return op !== null && typeof op === 'object' && !Array.isArray(op)
+    && typeof op.id === 'string' && op.id !== ''
+    && typeof op.hlc === 'string' && /^\d{13}-\d{4}-.+$/.test(op.hlc)
+    && typeof op.type === 'string';
+}
+
+// 濾掉格式不合的操作並逐筆警告。
+function validOps(ops) {
+  return ops.filter((op) => {
+    if (isValidOp(op)) return true;
+    console.warn(`略過格式不合的操作：${typeof op?.id === 'string' && op.id !== '' ? op.id : '(無 id)'}`);
+    return false;
+  });
+}
+
 // 清空所有由操作衍生的資料表後，依 (hlc, dev, id) 排序重播全部操作。
 // vectors 不是操作衍生的（由嵌入流程另外寫入），保留不動。
 // 整個清空＋重播包在一個交易（SAVEPOINT，可巢狀在外層交易裡）；失敗就回滾，舊資料保留。
@@ -18,7 +36,7 @@ export function rebuildAll(db, ops) {
   db.exec('SAVEPOINT rebuild_all');
   try {
     for (const t of TABLES) db.exec(`DELETE FROM ${t}`);
-    for (const op of [...ops].sort(compareOps)) replayOp(db, op);
+    for (const op of ops.filter(isValidOp).sort(compareOps)) replayOp(db, op);
     db.exec('RELEASE rebuild_all');
   } catch (e) {
     db.exec('ROLLBACK TO rebuild_all');
@@ -44,8 +62,8 @@ export function replayOp(db, op) {
 // 同時讓混合時鐘觀察所有操作的 hlc。回傳 {applied, rebuilt}。
 export function catchUp({ db, oplog, hlc }) {
   if (!hlc) throw new Error('catchUp 需要混合時鐘 hlc');
-  const all = oplog.readAll();
-  for (const op of all) if (op.hlc) hlc.observe(op.hlc);
+  const all = validOps(oplog.readAll());
+  for (const op of all) hlc.observe(op.hlc);
   const appliedIds = new Set(db.prepare('SELECT op_id FROM applied').all().map((r) => r.op_id));
   // 資料庫裡有主本沒有的已套用操作（例如搭配了別的 ops 目錄）：資料庫不可信，整個重建
   const known = new Set(all.map((op) => String(op.id)));
@@ -166,14 +184,14 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
     return cur; // 迴圈（理論上不會發生）：停在重複處
   };
 
-  // person: 標籤先經 resolve 再比，合併後的人仍對得上合併前的標籤。
-  const normAud = (a) => (typeof a === 'string' && a.startsWith('person:') ? `person:${resolve(a.slice(7))}` : a);
-
-  // 寫入範圍 W 只能取代或讓範圍 T 的事實失效，當 W === T（person: resolve 後比）或 W 是 public。
+  // 寫入範圍 W 只能取代或讓範圍 T 的事實失效，當 W === T（字串完全相同，不經 resolve）或 W 是 public。
   const checkWidth = (space, writeAud, factId) => {
     const f = get('SELECT audience FROM facts WHERE id = ? AND space = ?', factId ?? null, space ?? null);
     if (!f) throw new Error(`找不到事實：${factId}`);
-    if (writeAud === 'public' || normAud(writeAud) === normAud(f.audience)) return;
+    if (writeAud === 'public' || writeAud === f.audience) return;
+    if (writeAud.startsWith('person:') && f.audience.startsWith('person:')) {
+      throw new Error(`不能用另一人的私下資訊改動這條事實：${factId}（${f.audience}）`);
+    }
     throw new Error(`不能用較私下的資訊改動較公開的事實：${factId}（${f.audience}）`);
   };
 
@@ -219,16 +237,20 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
       if (name == null || name === '') throw new Error('新建人物時 name 必填');
       if (!Array.isArray(audiences) || audiences.length === 0) throw new Error('audiences 要是非空陣列');
       for (const a of audiences) checkAudience(a);
-      const allowed = new Set(audiences.map(normAud));
+      const allowed = new Set(audiences);
       // 建立前先找可能重複的人物（名稱、看得到的別名、全文）
       const key = nameKey(name);
       const found = new Map();
-      const add = (id, nm, why) => { if (!found.has(id)) found.set(id, { entityId: id, name: nm, why }); };
+      // 候選以合併後的人（resolvedId）去重；entityId 保留命中的那一列（別名原本綁定的人物）
+      const add = (id, nm, why) => {
+        const resolvedId = resolve(id);
+        if (!found.has(resolvedId)) found.set(resolvedId, { entityId: id, resolvedId, name: nm, why });
+      };
       for (const e of all_('SELECT id, name FROM entities WHERE space = ? AND name IS NOT NULL', space)) {
         if (nameKey(e.name) === key) add(e.id, e.name, 'name');
       }
       for (const a of all_('SELECT entity_id, alias, audience FROM aliases WHERE space = ? AND alias_key = ?', space, key)) {
-        if (!allowed.has(normAud(a.audience))) continue;
+        if (!allowed.has(a.audience)) continue;
         const e = get('SELECT name FROM entities WHERE id = ?', a.entity_id);
         add(a.entity_id, e?.name ?? a.alias, 'alias');
       }
@@ -259,11 +281,13 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
       return aliasId;
     },
 
+    // 回傳 { entityId, resolvedId }：entityId＝這個 handle 原本綁定的人物，resolvedId＝合併後的人。
+    // 可見範圍 person: 標籤一律用 entityId（不跟著合併），主體與關係用 resolvedId。找不到回 null。
     findByHandle(space, platform, handle) {
       const row = get(
         `SELECT entity_id FROM aliases WHERE space = ? AND platform IS ? AND is_handle = 1 AND alias_key = ?
          ORDER BY id LIMIT 1`, space, platform ?? null, nameKey(handle));
-      return row ? resolve(row.entity_id) : null;
+      return row ? { entityId: row.entity_id, resolvedId: resolve(row.entity_id) } : null;
     },
 
     logEpisode(space, { at, source, audience, body, entityIds }) {
@@ -288,13 +312,12 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
       // 先查同類仍成立的事實（不含這一筆本身），寫入後交給呼叫者決定要不要 invalidate。
       // 主體比對用 resolve 後的人；只回傳公開的、或與這次寫入同一可見範圍的事實，避免把私下的事帶進公開場合。
       const subj = resolve(subjectId);
-      const aud = normAud(audience);
       const sameKindActive = all_(
         `SELECT id, subject_id, predicate, object_entity, object_text, object_fact, audience FROM facts
          WHERE space = ? AND predicate = ? AND (valid_to IS NULL OR valid_to = '')`,
         space, predicate ?? null)
         .filter((f) => resolve(f.subject_id) === subj)
-        .filter((f) => f.audience === 'public' || normAud(f.audience) === aud)
+        .filter((f) => f.audience === 'public' || f.audience === audience)
         .filter((f) => !(supersedes ?? []).includes(f.id))
         .map((f) => ({ factId: f.id, predicate: f.predicate,
           object: f.object_entity ?? f.object_text ?? f.object_fact ?? null }));

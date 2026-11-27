@@ -1,10 +1,10 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { OpLog, loadDevice } from '../../core/oplog.mjs';
+import { execFileSync, spawn } from 'node:child_process';
+import { OpLog, loadDevice, LOCK_HOST } from '../../core/oplog.mjs';
 
 process.env.GIT_AUTHOR_NAME = '測試';
 process.env.GIT_AUTHOR_EMAIL = 'test@example.com';
@@ -53,11 +53,17 @@ test('最後一行不完整：略過並警告，不丟錯', () => {
   assert.deepEqual(warns, ['略過不完整的最後一行：pc-DEV1.jsonl']);
 });
 
-test('中間行壞掉：丟錯，訊息含檔名與行號', () => {
+test('中間行壞掉：略過該行並警告含檔名與行號，回傳其餘各行', () => {
   const dir = tmp();
   const log = mk(dir);
-  fs.writeFileSync(path.join(dir, 'pc-DEV1.jsonl'), JSON.stringify(op('a')) + '\n{壞掉\n' + JSON.stringify(op('c')) + '\n');
-  assert.throws(() => log.readAll(), (e) => e.message.includes('pc-DEV1.jsonl') && e.message.includes('第 2 行'));
+  fs.writeFileSync(path.join(dir, 'pc-DEV1.jsonl'), JSON.stringify(op('a')) + '\n{壞\n' + JSON.stringify(op('c')) + '\n');
+  const warns = [];
+  const orig = console.warn;
+  console.warn = (m) => warns.push(m);
+  try {
+    assert.deepEqual(log.readAll().map((o) => o.id), ['a', 'c']);
+  } finally { console.warn = orig; }
+  assert.deepEqual(warns, ['略過無法解析的操作：pc-DEV1.jsonl 第 2 行']);
 });
 
 test('讀取多個裝置的檔、略過空行', () => {
@@ -141,4 +147,257 @@ test('沒有 git 身分時也能初始化並 append（改用 mycelium 預設身�
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { env: noIdentityEnv(), encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.match(git(dir, 'log', '-1', '--format=%s'), /^op note a/);
+});
+
+// ---- 鎖檔加固 ----
+const mkLog = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lk-'));
+  return new OpLog({ dir, device: 'd1', deviceName: 'h' });
+};
+
+test('鎖檔內容含 pid、host、token', () => {
+  const log = mkLog();
+  log.withLock(() => {
+    const info = JSON.parse(fs.readFileSync(log.lockPath, 'utf8'));
+    assert.equal(info.pid, process.pid);
+    assert.equal(info.host, LOCK_HOST);
+    assert.ok(LOCK_HOST.startsWith(os.hostname()));
+    assert.ok(info.token);
+  });
+  assert.equal(fs.existsSync(log.lockPath), false);
+});
+
+test('釋放時鎖已換成別人的：不刪並警告', () => {
+  const log = mkLog();
+  const warns = [];
+  const orig = console.warn; console.warn = (m) => warns.push(m);
+  try {
+    log.withLock(() => {
+      fs.writeFileSync(log.lockPath, JSON.stringify({ pid: 1, host: 'other', token: 'someone-else' }));
+    });
+  } finally { console.warn = orig; }
+  assert.ok(fs.existsSync(log.lockPath));
+  assert.equal(JSON.parse(fs.readFileSync(log.lockPath, 'utf8')).token, 'someone-else');
+  assert.ok(warns.length > 0);
+});
+
+const deadPid = () => {
+  // 取一個已結束的子程序 pid
+  const r = execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+  return Number(r);
+};
+const writeStale = (log, pid, { host = LOCK_HOST, token = 'old', ageMs = 120000 } = {}) => {
+  fs.writeFileSync(log.lockPath, JSON.stringify({ pid, tid: 0, host, token }));
+  const old = new Date(Date.now() - ageMs);
+  fs.utimesSync(log.lockPath, old, old);
+};
+// 另開一個仍活著的子程序，回傳 pid 與結束函式
+const livePid = () => {
+  const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  return { pid: c.pid, stop: () => c.kill() };
+};
+
+test('殘留鎖（pid 已不存在、mtime 超過 60 秒）可被取得', () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  let got = false;
+  try { log.withLock(() => { got = true; }); } finally { console.warn = orig; }
+  assert.equal(got, true);
+  assert.equal(fs.existsSync(log.lockPath), false);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
+});
+
+test('mtime 很舊但 pid 還活著（另一個程序）：不當殘留鎖', () => {
+  const log = mkLog();
+  const live = livePid();
+  try {
+    writeStale(log, live.pid);
+    const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+    log2.lockWaitMs = 300;
+    assert.throws(() => log2.withLock(() => {}), /等不到/);
+  } finally { live.stop(); }
+});
+
+test('pid 是自己但 token 不是本程序持有（容器重啟同 pid）：mtime 超過門檻就回收', () => {
+  const log = mkLog();
+  writeStale(log, process.pid, { token: 'crashed-run', ageMs: 3600000 });
+  log.lockWaitMs = 2000;
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  let got = false;
+  try { log.withLock(() => { got = true; }); } finally { console.warn = orig; }
+  assert.equal(got, true);
+  assert.equal(fs.existsSync(log.lockPath), false);
+});
+
+test('同程序另一個 OpLog 正持有的鎖：mtime 很舊也不回收', () => {
+  const log = mkLog();
+  const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+  log2.lockWaitMs = 300;
+  log.withLock(() => {
+    const old = new Date(Date.now() - 3600000);
+    fs.utimesSync(log.lockPath, old, old);
+    assert.throws(() => log2.withLock(() => {}), /等不到/);
+  });
+});
+
+test('host 不同（含 pid namespace 不同）：pid 活著也只看 mtime', () => {
+  const log = mkLog();
+  const live = livePid();
+  try {
+    writeStale(log, live.pid, { host: `${os.hostname()}#pid:[1]` });
+    const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+    let got = false;
+    try { log.withLock(() => { got = true; }); } finally { console.warn = orig; }
+    assert.equal(got, true);
+  } finally { live.stop(); }
+});
+
+test('三方競態：持有中鎖被搬到 .lock.stale-*，釋放時刪掉自己那份', () => {
+  const log = mkLog();
+  log.withLock(() => {
+    fs.renameSync(log.lockPath, `${log.lockPath}.stale-B`); // 別人剛把鎖搬走、還沒放回
+  });
+  assert.equal(fs.existsSync(`${log.lockPath}.stale-B`), false);
+  assert.equal(fs.existsSync(log.lockPath), false);
+  // 搬走的人這時才放回：來源已不存在，放不回去
+  assert.throws(() => fs.linkSync(`${log.lockPath}.stale-B`, log.lockPath));
+});
+
+test('三方競態：已放回的鎖與搬走的那份都在，釋放時兩份都刪', () => {
+  const log = mkLog();
+  log.withLock(() => {
+    fs.renameSync(log.lockPath, `${log.lockPath}.stale-B`);
+    fs.linkSync(`${log.lockPath}.stale-B`, log.lockPath);
+  });
+  assert.equal(fs.existsSync(`${log.lockPath}.stale-B`), false);
+  assert.equal(fs.existsSync(log.lockPath), false);
+});
+
+test('三方競態：搬走與放回之間持有者釋放，不留下孤兒鎖', () => {
+  const log = mkLog();
+  const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  try {
+    log.withLock(() => {
+      const tok = JSON.parse(fs.readFileSync(log.lockPath, 'utf8')).token;
+      log2.onStaleMoved = () => log.release(tok); // 持有者剛好在這時釋放
+      log2.removeStale({ token: 'judged-old', mtimeMs: 0 }, 'B');
+    });
+  } finally { console.warn = orig; }
+  assert.equal(fs.existsSync(log.lockPath), false);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
+});
+
+test('移除時搬到的是本程序已釋放的鎖：不放回', () => {
+  const log = mkLog();
+  // pid 是自己、token 不在持有清單：一定是孤兒
+  fs.writeFileSync(log.lockPath, JSON.stringify({ pid: process.pid, tid: 0, host: LOCK_HOST, token: 'released' }));
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  try { log.removeStale({ token: 'something-else', mtimeMs: 0 }, 'mine'); } finally { console.warn = orig; }
+  assert.equal(fs.existsSync(log.lockPath), false);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
+});
+
+test('兩個程序同時搶殘留鎖：臨界區不重疊，兩邊都拿到', async () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  const mark = path.join(log.dir, 'marks.txt');
+  const code = `
+    import fs from 'node:fs';
+    import { OpLog } from ${JSON.stringify(new URL('../../core/oplog.mjs', import.meta.url).href)};
+    const l = new OpLog({ dir: process.argv[1], device: 'p' + process.pid, deviceName: 'h', autoCommit: false });
+    l.withLock(() => {
+      fs.appendFileSync(process.argv[2], 'in ' + process.pid + ' ' + Date.now() + '\\n');
+      const t = Date.now(); while (Date.now() - t < 300);
+      fs.appendFileSync(process.argv[2], 'out ' + process.pid + ' ' + Date.now() + '\\n');
+    });
+  `;
+  const run = () => new Promise((res) => {
+    const c = spawn(process.execPath, ['--input-type=module', '-e', code, log.dir, mark], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = ''; c.stderr.on('data', (d) => { err += d; });
+    c.on('close', (status) => res({ status, err }));
+  });
+  const rs = await Promise.all([run(), run()]);
+  for (const r of rs) assert.equal(r.status, 0, r.err);
+  const lines = fs.readFileSync(mark, 'utf8').trim().split('\n').map((l) => l.split(' '));
+  assert.equal(lines.length, 4);
+  // 事件依時間排序後必須是 in,out,in,out（同一程序配對），不可交錯
+  const ev = lines.map(([k, pid, t]) => ({ k, pid, t: Number(t) })).sort((x, y) => x.t - y.t || (x.k === 'out' ? -1 : 1));
+  assert.deepEqual(ev.map((e) => e.k), ['in', 'out', 'in', 'out']);
+  assert.equal(ev[0].pid, ev[1].pid);
+  assert.equal(ev[2].pid, ev[3].pid);
+  assert.equal(fs.existsSync(log.lockPath), false);
+});
+
+test('判定殘留後、移除前鎖被換成新鎖：新鎖不被刪，原持有者仍持有', () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+  log2.lockWaitMs = 300;
+  const live = livePid();
+  after(() => live.stop());
+  const fresh = JSON.stringify({ pid: live.pid, tid: 0, host: LOCK_HOST, token: 'fresh-owner' });
+  let swapped = false;
+  log2.onStaleJudged = () => {
+    if (swapped) return;
+    swapped = true;
+    fs.rmSync(log.lockPath);
+    fs.writeFileSync(log.lockPath, fresh); // 別人剛拿到鎖
+  };
+  assert.throws(() => log2.withLock(() => assert.fail('不該進入臨界區')), /等不到/);
+  assert.equal(fs.readFileSync(log.lockPath, 'utf8'), fresh);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
+});
+
+test('Windows：openSync 遇 EPERM／EACCES 視為暫時性，重試後取得鎖', () => {
+  const log = mkLog();
+  const realOpen = fs.openSync;
+  const plat = Object.getOwnPropertyDescriptor(process, 'platform');
+  let fails = 0;
+  fs.openSync = (p, ...rest) => {
+    if (p === log.lockPath && fails < 3) {
+      fails++;
+      const e = new Error('模擬'); e.code = fails % 2 ? 'EPERM' : 'EACCES'; throw e;
+    }
+    return realOpen(p, ...rest);
+  };
+  Object.defineProperty(process, 'platform', { ...plat, value: 'win32' });
+  let got = false;
+  try { log.withLock(() => { got = true; }); } finally {
+    fs.openSync = realOpen;
+    Object.defineProperty(process, 'platform', plat);
+  }
+  assert.equal(got, true);
+  assert.equal(fails, 3);
+});
+
+test('非 Windows 的 EPERM 照丟', () => {
+  const log = mkLog();
+  const realOpen = fs.openSync;
+  fs.openSync = (p, ...rest) => {
+    if (p === log.lockPath) { const e = new Error('模擬'); e.code = 'EPERM'; throw e; }
+    return realOpen(p, ...rest);
+  };
+  // 在 Windows CI 上也要驗「非 Windows」的行為，所以把平台固定成 linux
+  const plat = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...plat, value: 'linux' });
+  try { assert.throws(() => log.withLock(() => {}), (e) => e.code === 'EPERM'); } finally {
+    fs.openSync = realOpen;
+    Object.defineProperty(process, 'platform', plat);
+  }
+});
+
+test('殘留鎖搬不走（非 ENOENT）：同一把鎖只警告一次', () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  log.lockWaitMs = 400;
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, ...rest) => {
+    if (from === log.lockPath) { const e = new Error('模擬'); e.code = 'EBUSY'; throw e; }
+    return realRename(from, ...rest);
+  };
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  try { assert.throws(() => log.withLock(() => {}), /等不到/); } finally { fs.renameSync = realRename; console.warn = orig; }
+  assert.equal(warns.filter((w) => w.includes('無法移除殘留的鎖檔')).length, 1);
 });

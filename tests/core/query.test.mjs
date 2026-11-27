@@ -137,17 +137,55 @@ test('recall 不帶 audiences 丟錯；remember 用未知範圍丟錯', () => {
   assert.throws(() => s.remember(SP, { subjectId: ids.城主, predicate: 'x', objectText: 'y', validFrom: '2026-01-01', audience: 'secret', author: 't' }), /未知的可見範圍/);
 });
 
-test('合併：併入白衣客後，原綁給林小雨的私事用 person:白衣客 查得到', () => {
+test('合併：林小雨併入白衣客後，person:林小雨 的私事不擴散給 person:白衣客', () => {
   const { s, ids, fact } = fresh();
   fact(ids.小雨, '心事', { objectText: '想學劍的心事', audience: `person:${ids.小雨}` });
+  fact(ids.小雨, '身分', { objectText: '山下的學徒' });
   fact(ids.黑袍, '祕密', { objectText: '別人的私事', audience: `person:${ids.城主}` });
   s.mergeEntities(SP, ids.小雨, ids.白衣客, '同一人');
+  // 公開事實照常跟著合併歸到白衣客
   const r = s.recall(SP, { text: '白衣客來了', audiences: ['public', `person:${ids.白衣客}`] });
-  assert.ok(r.text.includes('想學劍的心事'));
+  assert.ok(r.text.includes('山下的學徒'));
+  assert.ok(!dump(r).includes('想學劍的心事'));
   assert.ok(!dump(r).includes('別人的私事'));
   const pub = s.recall(SP, { text: '白衣客來了', audiences: ['public'] });
   assert.ok(!pub.text.includes('想學劍的心事'));
+  // 正控制：用原本的標籤查得到兩者
+  const own = s.recall(SP, { text: '白衣客來了', audiences: ['public', `person:${ids.小雨}`] });
+  assert.ok(own.text.includes('想學劍的心事'));
+  assert.ok(own.text.includes('山下的學徒'));
   assert.equal(r.entities.filter((e) => e.id === ids.小雨).length, 0);
+});
+
+test('合併不擴散：getEntity、timeline、neighbors、search、episode、別名都用完全比對', () => {
+  const { s, ids, fact } = fresh();
+  const mine = `person:${ids.小雨}`;
+  const other = [ 'public', `person:${ids.白衣客}` ];
+  const own = [ 'public', mine ];
+  fact(ids.小雨, '心事', { objectText: '想學劍的心事', audience: mine });
+  fact(ids.小雨, '暗戀', { objectEntity: ids.城主, audience: mine });
+  s.logEpisode(SP, { at: '2026-02-01', source: 'dm', audience: mine, body: '小雨私下提到玉佩的來歷', entityIds: [ids.小雨] });
+  s.addAlias(SP, ids.小雨, '雨妹秘稱', { audience: mine });
+  s.mergeEntities(SP, ids.小雨, ids.白衣客, '同一人');
+  // getEntity
+  assert.ok(!dump(s.getEntity(SP, ids.白衣客, { audiences: other })).includes('想學劍的心事'));
+  assert.ok(!s.getEntity(SP, ids.白衣客, { audiences: other }).aliases.some((x) => x.alias === '雨妹秘稱'));
+  assert.ok(s.getEntity(SP, ids.白衣客, { audiences: own }).aliases.some((x) => x.alias === '雨妹秘稱'));
+  // timeline
+  assert.ok(!dump(s.timeline(SP, { entityId: ids.白衣客, audiences: other })).includes('想學劍的心事'));
+  assert.ok(dump(s.timeline(SP, { entityId: ids.白衣客, audiences: own })).includes('想學劍的心事'));
+  // neighbors：私下的關係邊
+  assert.ok(!s.neighbors(SP, ids.白衣客, { audiences: other }).entities.some((e) => e.id === ids.城主));
+  assert.ok(s.neighbors(SP, ids.白衣客, { audiences: own }).entities.some((e) => e.id === ids.城主));
+  // search：事實、episode、別名
+  assert.ok(!dump(s.search(SP, '玉佩', { audiences: other })).includes('玉佩'));
+  assert.ok(dump(s.search(SP, '玉佩', { audiences: own })).includes('玉佩'));
+  assert.ok(!dump(s.search(SP, '想學劍', { audiences: other })).includes('想學劍'));
+  assert.ok(!s.search(SP, '雨妹秘稱', { audiences: other }).some((h) => h.id === ids.白衣客));
+  assert.ok(s.search(SP, '雨妹秘稱', { audiences: own }).some((h) => h.id === ids.白衣客));
+  const rr = s.recall(SP, { text: '雨妹秘稱來了', audiences: other });
+  assert.ok(!dump(rr).includes('想學劍的心事'));
+  assert.ok(!dump(rr).includes('玉佩'));
 });
 
 test('maxChars 截在整行邊界、不超過上限', () => {
@@ -318,4 +356,72 @@ test('公開查詢輸出的 superseded_by／source_episode 不指向看不到的
   assert.equal(s.db.prepare('SELECT superseded_by FROM facts WHERE id=?').get(pub).superseded_by, priv);
   const g2 = s.getEntity(SP, ids.小雨, { audiences: ['public', `person:${ids.城主}`] });
   assert.equal(g2.pastFacts.find((f) => f.id === pub).superseded_by, priv);
+});
+
+test('合併不擴散：sameKindActive 與 upsertEntity 候選不帶出合併前的私下紀錄', () => {
+  const { s, ids, fact } = fresh();
+  const mine = `person:${ids.小雨}`;
+  const priv = fact(ids.小雨, '住在', { objectText: '山下的小屋', audience: mine });
+  s.addAlias(SP, ids.小雨, '雨妹秘稱', { audience: mine });
+  s.mergeEntities(SP, ids.小雨, ids.白衣客, '同一人');
+  const r = s.remember(SP, { subjectId: ids.白衣客, predicate: '住在', objectText: '客棧', validFrom: '2026-11-01',
+    audience: `person:${ids.白衣客}`, author: 't' });
+  assert.ok(!r.sameKindActive.some((x) => x.factId === priv));
+  assert.ok(!dump(r).includes('山下的小屋'));
+  // 正控制：用原標籤寫入會列出
+  const r2 = s.remember(SP, { subjectId: ids.白衣客, predicate: '住在', objectText: '山頂', validFrom: '2026-11-02',
+    audience: mine, author: 't' });
+  assert.ok(r2.sameKindActive.some((x) => x.factId === priv));
+  // upsertEntity 候選
+  const c = s.upsertEntity(SP, { type: 'person', name: '雨妹秘稱', audiences: ['public', `person:${ids.白衣客}`] });
+  assert.ok(!c.candidates.some((x) => x.why === 'alias'));
+  const c2 = s.upsertEntity(SP, { type: 'person', name: '雨妹秘稱', audiences: ['public', mine] });
+  assert.ok(c2.candidates.some((x) => x.why === 'alias')); // 別名仍綁在原人物列上
+});
+
+test('合併不擴散：checkWidth 不讓 person:白衣客 取代合併前 person:林小雨 的事實', () => {
+  const { s, ids, fact } = fresh();
+  const mine = `person:${ids.小雨}`;
+  const priv = fact(ids.小雨, '暗號', { objectText: '甲', audience: mine });
+  s.mergeEntities(SP, ids.小雨, ids.白衣客, '同一人');
+  const n = s.oplog.readAll().length;
+  assert.throws(() => s.remember(SP, { subjectId: ids.白衣客, predicate: '暗號', objectText: '乙', validFrom: '2026-02-01',
+    audience: `person:${ids.白衣客}`, author: 't', supersedes: [priv] }), /不能用另一人的私下資訊改動這條事實/);
+  assert.throws(() => s.invalidate(SP, priv, '2026-03-01', undefined, `person:${ids.白衣客}`), /不能用另一人的私下資訊改動這條事實/);
+  assert.equal(s.oplog.readAll().length, n);
+  // 正控制：同一個標籤可以取代
+  s.remember(SP, { subjectId: ids.白衣客, predicate: '暗號', objectText: '丙', validFrom: '2026-02-01',
+    audience: mine, author: 't', supersedes: [priv] });
+});
+
+// ---- I3：handle 查到的 entityId 是原綁定的人物，person: 標籤用它 ----
+test('findByHandle：A 併入 B 後回 entityId=A、resolvedId=B；用 person:A 寫的私事只在 person:A 看得到', () => {
+  const { s, ids } = fresh();
+  s.addAlias(SP, ids.劍客, '@rainblade', { platform: 'line', isHandle: true });
+  s.mergeEntities(SP, ids.劍客, ids.白衣客, '本人公開聲明');
+  const h = s.findByHandle(SP, 'line', '@rainblade');
+  assert.deepEqual(h, { entityId: ids.劍客, resolvedId: ids.白衣客 });
+  assert.equal(s.findByHandle(SP, 'line', '@nobody'), null);
+  // 主體用 resolvedId，audience 用原綁定的 entityId
+  s.remember(SP, { subjectId: h.resolvedId, predicate: '私下說', objectText: '明天要去北山採藥', validFrom: '2026-01-02',
+    audience: `person:${h.entityId}`, author: 't' });
+  const seen = s.recall(SP, { text: '白衣客', audiences: ['public', `person:${ids.劍客}`] });
+  assert.ok(dump(seen).includes('明天要去北山採藥'));
+  const hidden = s.recall(SP, { text: '白衣客', audiences: ['public', `person:${ids.白衣客}`] });
+  assert.ok(!dump(hidden).includes('明天要去北山採藥'));
+});
+
+test('upsertEntity 候選帶 resolvedId，同一個 resolvedId 只列一次', () => {
+  const { s, ids } = fresh();
+  s.addAlias(SP, ids.劍客, '白衣客');
+  s.mergeEntities(SP, ids.劍客, ids.白衣客, '同一人');
+  const c = s.upsertEntity(SP, { type: 'person', name: '白衣客' });
+  const hits = c.candidates.filter((x) => x.resolvedId === ids.白衣客);
+  assert.equal(hits.length, 1);
+  for (const x of c.candidates) assert.equal(x.resolvedId, s.resolve(x.entityId));
+  // 只有別名命中的人物：entityId 保留原綁定，resolvedId 是合併後的人
+  s.addAlias(SP, ids.黑袍, '夜行者');
+  s.mergeEntities(SP, ids.黑袍, ids.城主, '同一人');
+  const c2 = s.upsertEntity(SP, { type: 'person', name: '夜行者' });
+  assert.ok(c2.candidates.some((x) => x.entityId === ids.黑袍 && x.resolvedId === ids.城主 && x.why === 'alias'));
 });

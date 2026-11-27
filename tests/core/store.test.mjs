@@ -101,7 +101,7 @@ test('addAlias 太短丟錯；findByHandle', () => {
   const { a } = seed(s);
   assert.throws(() => s.addAlias(SP, a, '小'), /別名至少兩個字/);
   s.addAlias(SP, a, '@xiaoyu', { platform: 'line', isHandle: true });
-  assert.equal(s.findByHandle(SP, 'line', '@XiaoYu'), a);
+  assert.deepEqual(s.findByHandle(SP, 'line', '@XiaoYu'), { entityId: a, resolvedId: a });
   assert.equal(s.findByHandle(SP, 'line', '@nobody'), null);
   s.close();
 });
@@ -282,6 +282,21 @@ test('殘留超過 60 秒的鎖檔視為殘留並移除', () => {
   s.close();
 });
 
+test('同 pid 重啟留下的鎖（pid 是自己、token 不是本程序持有、一小時前）：openStore 能取得', async () => {
+  const { LOCK_HOST } = await import('../../core/oplog.mjs');
+  const cfg = mkdirs();
+  openStore(cfg).close();
+  const lock = path.join(cfg.opsDir, '.lock');
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, tid: 0, host: LOCK_HOST, token: 'crashed-run' }));
+  const old = new Date(Date.now() - 3600000);
+  fs.utimesSync(lock, old, old);
+  const t = Date.now();
+  const s = openStore(cfg);
+  assert.ok(Date.now() - t < 5000);
+  s.close();
+  assert.ok(!fs.existsSync(lock));
+});
+
 test('兩個子程序同時寫同一個 db 與 ops：全部寫進、時鐘不重複', async () => {
   const cfg = mkdirs();
   const s = openStore(cfg);
@@ -386,4 +401,35 @@ test('mergeEntities 兩邊要在同一個空間', () => {
   assert.throws(() => s.mergeEntities('other', a, x, '同一人'), /同一個空間/);
   assert.throws(() => s.mergeEntities(SP, a, 'nobody', '同一人'), /找不到人物/);
   s.close();
+});
+
+test('格式不合的操作行：開啟不丟錯、資料都在、各警告一次、重開不重建', () => {
+  const cfg = mkdirs();
+  const s = openStore(cfg);
+  const { a } = seed(s);
+  s.close();
+  const file = fs.readdirSync(cfg.opsDir).find((f) => f.endsWith('.jsonl'));
+  fs.appendFileSync(path.join(cfg.opsDir, file), [
+    '{"id":"x","hlc":"garbage","type":"create_entity","space":"demo","data":{}}',
+    'null',
+    '{"hlc":"0000000000001-0000-dev","type":"create_entity"}',
+    '',
+  ].join('\n'));
+  const warns = [];
+  const orig = console.warn;
+  console.warn = (m) => warns.push(String(m));
+  let s2;
+  try {
+    s2 = openStore(cfg);
+  } finally { console.warn = orig; }
+  assert.equal(s2.db.prepare('SELECT name FROM entities WHERE id=?').get(a).name, '林小雨');
+  assert.equal(warns.filter((m) => m.startsWith('略過格式不合的操作')).length, 3);
+  assert.ok(warns.includes('略過格式不合的操作：x'));
+  assert.ok(warns.includes('略過格式不合的操作：(無 id)'));
+  const n = s2.db.prepare('SELECT COUNT(*) c FROM applied').get().c;
+  s2.close();
+  const s3 = openStore(cfg);
+  assert.equal(s3.db.prepare('SELECT COUNT(*) c FROM applied').get().c, n);
+  assert.equal(s3.db.prepare('SELECT name FROM entities WHERE id=?').get(a).name, '林小雨');
+  s3.close();
 });

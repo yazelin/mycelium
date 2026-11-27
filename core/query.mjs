@@ -14,17 +14,14 @@ function spaceRow(store, space) {
   return row;
 }
 
-// 兩邊的 person: 標籤都先經 resolve，合併後的人仍看得到合併前綁給他的紀錄。
-function normAud(store, a) {
-  return typeof a === 'string' && a.startsWith('person:') ? `person:${store.resolve(a.slice(7))}` : a;
-}
-
+// 可見範圍標籤一律字串完全相同才算數：person: 的對象不經 resolve，
+// 合併後原帳號的私下紀錄不會擴散給合併後的整個人物。
 function visibility(store, audiences, who) {
   if (!Array.isArray(audiences) || audiences.length === 0) {
     throw new Error(`${who} 要指定能看哪些可見範圍`);
   }
-  const allowed = new Set(audiences.map((a) => normAud(store, a)));
-  return (row) => allowed.has(normAud(store, row.audience));
+  const allowed = new Set(audiences);
+  return (row) => allowed.has(row.audience);
 }
 
 // 舊資料可能帶著章節清單裡沒有的章節：這種紀錄的時間無法判定，查詢時略過並 warn 一次（不讓整個查詢丟錯）。

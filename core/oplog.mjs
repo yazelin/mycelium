@@ -2,10 +2,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { threadId } from 'node:worker_threads';
 import { ulid } from './ids.mjs';
 
 const LOCK_WAIT_MS = 10000; // 等鎖最多約 10 秒
 const LOCK_STALE_MS = 60000; // 鎖檔超過 60 秒視為當機殘留
+// 鎖檔的主機欄位：主機名＋pid namespace（Linux 容器重啟後主機名可能不變，但 pid 空間不同就不能用 pid 判斷存活）。
+function lockHost() {
+  try { return `${os.hostname()}#${fs.readlinkSync('/proc/self/ns/pid')}`; } catch { return os.hostname(); }
+}
+export const LOCK_HOST = lockHost();
+// 本程序目前持有的鎖 token（放在全域，同一程序載入多份模組也共用）。
+// 鎖檔的 pid／tid 是自己、token 卻不在這裡，就是上一次執行（同 pid 重啟）留下的殘留。
+const HELD = (globalThis[Symbol.for('mycelium.heldLockTokens')] ??= new Set());
+const isSelf = (info) => info.pid === process.pid && (info.tid ?? 0) === threadId;
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 const git = (dir, args) => execFileSync('git', args, { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -63,38 +73,140 @@ export class OpLog {
     }
   }
 
+  // 鎖檔內容 {pid, tid, host, token}：釋放時憑 token 確認還是自己的鎖才刪。
+  // 殘留判定：mtime 超過 60 秒，且同主機（主機名＋pid namespace 相同）時持有者 pid 已不存在，
+  // 或 pid 是自己但 token 不是本程序持有（同 pid 重啟留下的）。跨主機只看 mtime。
+  // 判定為殘留時回傳當時看到的 {token, mtimeMs}，供移除時確認沒被換掉；否則回傳 null。
+  staleObservation() {
+    let st;
+    try { st = fs.statSync(this.lockPath); } catch { return null; } // 鎖剛被釋放
+    if (Date.now() - st.mtimeMs <= LOCK_STALE_MS) return null;
+    let info = null;
+    try { info = JSON.parse(fs.readFileSync(this.lockPath, 'utf8')); } catch { /* 舊格式或半寫入：只看 mtime */ }
+    if (info && info.host === LOCK_HOST && Number.isInteger(info.pid)) {
+      if (isSelf(info)) {
+        if (HELD.has(info.token)) return null; // 本程序另一個物件正持有
+      } else if (info.pid !== process.pid) {
+        try {
+          process.kill(info.pid, 0);
+          return null; // 持有者還活著，只是很久沒更新
+        } catch (e) {
+          if (e.code === 'EPERM') return null;
+        }
+      } else {
+        return null; // 同程序的其他執行緒，無從得知是否持有：當作活著
+      }
+    }
+    return { token: info?.token ?? null, mtimeMs: st.mtimeMs };
+  }
+
+  // 把判定為殘留的鎖移走。rename 之後再核對一次：搬走的若不是剛才判定的那把（被別人換成新鎖），
+  // 就用 link 放回去（已有人重建鎖則 link 失敗，保持現狀），不刪。
+  // 放回前若搬到的是本程序（同 pid、同執行緒）已不持有的鎖，就是孤兒，不放回。
+  removeStale(seen, token) {
+    const trash = `${this.lockPath}.stale-${token}`;
+    try {
+      fs.renameSync(this.lockPath, trash);
+    } catch (e) {
+      if (e.code === 'ENOENT') return; // 別人已處理
+      // 同一把鎖只警告一次，不在等鎖迴圈裡洗版
+      const key = `${seen.token}:${seen.mtimeMs}`;
+      if (this.warnedStale !== key) {
+        this.warnedStale = key;
+        console.warn(`無法移除殘留的鎖檔（${e.code}）：${this.lockPath}`);
+      }
+      return;
+    }
+    let same = false;
+    let orphan = false;
+    try {
+      const info = JSON.parse(fs.readFileSync(trash, 'utf8'));
+      same = info.token === seen.token;
+      orphan = info.host === LOCK_HOST && isSelf(info) && !HELD.has(info.token);
+    } catch {
+      try { same = seen.token === null && fs.statSync(trash).mtimeMs === seen.mtimeMs; } catch { return; } // 持有者已刪掉
+    }
+    if (same || orphan) {
+      fs.rmSync(trash, { force: true });
+      console.warn(`移除殘留的鎖檔：${this.lockPath}`);
+      return;
+    }
+    this.onStaleMoved?.(); // 測試用：在搬走與放回之間插入動作
+    try { fs.linkSync(trash, this.lockPath); } catch { /* 已有人重建鎖，或持有者已刪掉搬走的那份：不動它 */ }
+    fs.rmSync(trash, { force: true });
+  }
+
+  // 釋放：刪掉內容是自己 token 的鎖檔，以及別人移除殘留時搬走、可能還沒放回的那份（.lock.stale-*）。
+  // 搬走的人可能在我們檢查之間把鎖放回，所以重複檢查到兩邊都沒有自己的鎖為止（最多幾輪）。
+  release(token) {
+    const mineAt = (file) => {
+      try { return JSON.parse(fs.readFileSync(file, 'utf8')).token === token; } catch { return false; }
+    };
+    let found = false;
+    for (let round = 0; round < 5; round++) {
+      let hit = false;
+      if (mineAt(this.lockPath)) { fs.rmSync(this.lockPath, { force: true }); hit = true; }
+      let names = [];
+      try { names = fs.readdirSync(this.dir); } catch { /* 目錄讀不到就略過 */ }
+      for (const name of names) {
+        if (!name.startsWith('.lock.stale-')) continue;
+        const file = path.join(this.dir, name);
+        if (mineAt(file)) { fs.rmSync(file, { force: true }); hit = true; }
+      }
+      if (!hit) break;
+      found = true;
+    }
+    if (!found) console.warn(`鎖檔已不是自己的，不刪除：${this.lockPath}`);
+  }
+
+  // 更新鎖檔 mtime，讓長操作不被誤判為殘留（同步函式內跑不了 interval，由呼叫端在長操作前後手動呼叫）。
+  touchLock() {
+    if (this.lockDepth === 0) return;
+    try {
+      if (JSON.parse(fs.readFileSync(this.lockPath, 'utf8')).token !== this.lockToken) return;
+      const now = new Date();
+      fs.utimesSync(this.lockPath, now, now);
+    } catch { /* 鎖檔不見了就算了，釋放時會警告 */ }
+  }
+
   // 跨程序鎖：多個 MCP server 與命令列 sync 可能同時用同一個 ops 目錄。可重入（同一物件內巢狀呼叫不會卡住）。
   withLock(fn) {
     if (this.lockDepth > 0) {
       this.lockDepth++;
       try { return fn(); } finally { this.lockDepth--; }
     }
-    const deadline = Date.now() + LOCK_WAIT_MS;
+    const token = ulid();
+    const deadline = Date.now() + (this.lockWaitMs ?? LOCK_WAIT_MS);
+    HELD.add(token); // 先登記，鎖檔一出現就認得是自己的
     for (;;) {
       try {
         const fd = fs.openSync(this.lockPath, 'wx');
-        fs.writeSync(fd, String(process.pid));
+        fs.writeSync(fd, JSON.stringify({ pid: process.pid, tid: threadId, host: LOCK_HOST, token }));
         fs.closeSync(fd);
         break;
       } catch (e) {
-        if (e.code !== 'EEXIST') throw e;
-        try {
-          if (Date.now() - fs.statSync(this.lockPath).mtimeMs > LOCK_STALE_MS) {
-            fs.rmSync(this.lockPath, { force: true });
-            console.warn(`移除殘留的鎖檔：${this.lockPath}`);
-            continue;
-          }
-        } catch { continue; } // 鎖剛好被釋放，再試一次
-        if (Date.now() > deadline) throw new Error(`等不到操作檔的鎖（${this.lockPath}），可能有別的程序卡住`);
+        // Windows 上檔案正被刪除或掃毒程式開著時會回 EPERM／EACCES，視為暫時性、重試
+        const transient = process.platform === 'win32' && (e.code === 'EPERM' || e.code === 'EACCES');
+        if (e.code !== 'EEXIST' && !transient) { HELD.delete(token); throw e; }
+        const seen = e.code === 'EEXIST' ? this.staleObservation() : null;
+        if (seen) {
+          this.onStaleJudged?.(); // 測試用：在判定與移除之間插入動作
+          this.removeStale(seen, token);
+        }
+        if (Date.now() > deadline) {
+          HELD.delete(token);
+          throw new Error(`等不到操作檔的鎖（${this.lockPath}），可能有別的程序卡住`);
+        }
         pause(20 + Math.floor(Math.random() * 30));
       }
     }
     this.lockDepth = 1;
+    this.lockToken = token;
     try {
       return fn();
     } finally {
       this.lockDepth = 0;
-      fs.rmSync(this.lockPath, { force: true });
+      try { this.release(token); } finally { HELD.delete(token); }
     }
   }
 
@@ -149,7 +261,7 @@ export class OpLog {
           if (i === last) {
             console.warn(`略過不完整的最後一行：${name}`);
           } else {
-            throw new Error(`操作檔 ${name} 第 ${i + 1} 行無法解析：${e.message}`);
+            console.warn(`略過無法解析的操作：${name} 第 ${i + 1} 行`);
           }
         }
       });

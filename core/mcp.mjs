@@ -23,7 +23,7 @@ const TOOLS = [
   },
   {
     name: 'upsert_entity',
-    description: `建立或更新人物／地點／物件。不帶 entityId 為新建（type、name 必填），會回傳可能重複的候選；帶 entityId 為更新名稱或摘要。回傳的候選或同類事實要自己判斷，系統不會自動合併。${PUBLIC_ONLY}`,
+    description: `建立或更新人物／地點／物件。不帶 entityId 為新建（type、name 必填），會回傳可能重複的候選（每個候選帶 entityId＝命中的那一列、resolvedId＝合併後的人物；person: 標籤用 entityId，主體與關係用 resolvedId）；帶 entityId 為更新名稱或摘要。回傳的候選或同類事實要自己判斷，系統不會自動合併。${PUBLIC_ONLY}`,
     // 「新建時 type、name 必填」寫在說明裡、由 Store 檢查；不用頂層 anyOf，有些模型 API 的工具 schema 不接受。
     inputSchema: obj({ space, type: { ...S, description: '種類，例如 person（新建時必填）' }, name: { ...S, description: '名稱（新建時必填）' },
       summary: S, entityId: { ...S, description: '要更新的人物 id' },

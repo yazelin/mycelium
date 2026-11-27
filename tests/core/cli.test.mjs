@@ -53,3 +53,14 @@ test('未知指令印用法並以 1 結束', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /用法/);
 });
+
+test('export 遇到 null 行不丟錯，只輸出有效操作', () => {
+  const root = tmp();
+  assert.equal(run(root, 'init', '--space', 'demo', '--name', '示範', '--kind', 'story', '--axis', 'chapter').status, 0);
+  const ops = path.join(root, 'ops');
+  const f = fs.readdirSync(ops).find((n) => n.endsWith('.jsonl'));
+  fs.appendFileSync(path.join(ops, f), 'null\n');
+  const e = run(root, 'export', '--space', 'demo');
+  assert.equal(e.status, 0, e.stderr);
+  assert.equal(e.stdout.split('\n').filter(Boolean).length, 1);
+});
