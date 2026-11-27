@@ -282,6 +282,21 @@ test('殘留超過 60 秒的鎖檔視為殘留並移除', () => {
   s.close();
 });
 
+test('同 pid 重啟留下的鎖（pid 是自己、token 不是本程序持有、一小時前）：openStore 能取得', async () => {
+  const { LOCK_HOST } = await import('../../core/oplog.mjs');
+  const cfg = mkdirs();
+  openStore(cfg).close();
+  const lock = path.join(cfg.opsDir, '.lock');
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, tid: 0, host: LOCK_HOST, token: 'crashed-run' }));
+  const old = new Date(Date.now() - 3600000);
+  fs.utimesSync(lock, old, old);
+  const t = Date.now();
+  const s = openStore(cfg);
+  assert.ok(Date.now() - t < 5000);
+  s.close();
+  assert.ok(!fs.existsSync(lock));
+});
+
 test('兩個子程序同時寫同一個 db 與 ops：全部寫進、時鐘不重複', async () => {
   const cfg = mkdirs();
   const s = openStore(cfg);

@@ -1,10 +1,10 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { OpLog, loadDevice } from '../../core/oplog.mjs';
+import { OpLog, loadDevice, LOCK_HOST } from '../../core/oplog.mjs';
 
 process.env.GIT_AUTHOR_NAME = '測試';
 process.env.GIT_AUTHOR_EMAIL = 'test@example.com';
@@ -160,7 +160,8 @@ test('鎖檔內容含 pid、host、token', () => {
   log.withLock(() => {
     const info = JSON.parse(fs.readFileSync(log.lockPath, 'utf8'));
     assert.equal(info.pid, process.pid);
-    assert.equal(info.host, os.hostname());
+    assert.equal(info.host, LOCK_HOST);
+    assert.ok(LOCK_HOST.startsWith(os.hostname()));
     assert.ok(info.token);
   });
   assert.equal(fs.existsSync(log.lockPath), false);
@@ -185,10 +186,15 @@ const deadPid = () => {
   const r = execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
   return Number(r);
 };
-const writeStale = (log, pid) => {
-  fs.writeFileSync(log.lockPath, JSON.stringify({ pid, host: os.hostname(), token: 'old' }));
-  const old = new Date(Date.now() - 120000);
+const writeStale = (log, pid, { host = LOCK_HOST, token = 'old', ageMs = 120000 } = {}) => {
+  fs.writeFileSync(log.lockPath, JSON.stringify({ pid, tid: 0, host, token }));
+  const old = new Date(Date.now() - ageMs);
   fs.utimesSync(log.lockPath, old, old);
+};
+// 另開一個仍活著的子程序，回傳 pid 與結束函式
+const livePid = () => {
+  const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  return { pid: c.pid, stop: () => c.kill() };
 };
 
 test('殘留鎖（pid 已不存在、mtime 超過 60 秒）可被取得', () => {
@@ -202,12 +208,95 @@ test('殘留鎖（pid 已不存在、mtime 超過 60 秒）可被取得', () => 
   assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
 });
 
-test('mtime 很舊但 pid 還活著：不當殘留鎖', () => {
+test('mtime 很舊但 pid 還活著（另一個程序）：不當殘留鎖', () => {
   const log = mkLog();
-  writeStale(log, process.pid);
+  const live = livePid();
+  try {
+    writeStale(log, live.pid);
+    const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+    log2.lockWaitMs = 300;
+    assert.throws(() => log2.withLock(() => {}), /等不到/);
+  } finally { live.stop(); }
+});
+
+test('pid 是自己但 token 不是本程序持有（容器重啟同 pid）：mtime 超過門檻就回收', () => {
+  const log = mkLog();
+  writeStale(log, process.pid, { token: 'crashed-run', ageMs: 3600000 });
+  log.lockWaitMs = 2000;
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  let got = false;
+  try { log.withLock(() => { got = true; }); } finally { console.warn = orig; }
+  assert.equal(got, true);
+  assert.equal(fs.existsSync(log.lockPath), false);
+});
+
+test('同程序另一個 OpLog 正持有的鎖：mtime 很舊也不回收', () => {
+  const log = mkLog();
   const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
   log2.lockWaitMs = 300;
-  assert.throws(() => log2.withLock(() => {}), /等不到/);
+  log.withLock(() => {
+    const old = new Date(Date.now() - 3600000);
+    fs.utimesSync(log.lockPath, old, old);
+    assert.throws(() => log2.withLock(() => {}), /等不到/);
+  });
+});
+
+test('host 不同（含 pid namespace 不同）：pid 活著也只看 mtime', () => {
+  const log = mkLog();
+  const live = livePid();
+  try {
+    writeStale(log, live.pid, { host: `${os.hostname()}#pid:[1]` });
+    const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+    let got = false;
+    try { log.withLock(() => { got = true; }); } finally { console.warn = orig; }
+    assert.equal(got, true);
+  } finally { live.stop(); }
+});
+
+test('三方競態：持有中鎖被搬到 .lock.stale-*，釋放時刪掉自己那份', () => {
+  const log = mkLog();
+  log.withLock(() => {
+    fs.renameSync(log.lockPath, `${log.lockPath}.stale-B`); // 別人剛把鎖搬走、還沒放回
+  });
+  assert.equal(fs.existsSync(`${log.lockPath}.stale-B`), false);
+  assert.equal(fs.existsSync(log.lockPath), false);
+  // 搬走的人這時才放回：來源已不存在，放不回去
+  assert.throws(() => fs.linkSync(`${log.lockPath}.stale-B`, log.lockPath));
+});
+
+test('三方競態：已放回的鎖與搬走的那份都在，釋放時兩份都刪', () => {
+  const log = mkLog();
+  log.withLock(() => {
+    fs.renameSync(log.lockPath, `${log.lockPath}.stale-B`);
+    fs.linkSync(`${log.lockPath}.stale-B`, log.lockPath);
+  });
+  assert.equal(fs.existsSync(`${log.lockPath}.stale-B`), false);
+  assert.equal(fs.existsSync(log.lockPath), false);
+});
+
+test('三方競態：搬走與放回之間持有者釋放，不留下孤兒鎖', () => {
+  const log = mkLog();
+  const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  try {
+    log.withLock(() => {
+      const tok = JSON.parse(fs.readFileSync(log.lockPath, 'utf8')).token;
+      log2.onStaleMoved = () => log.release(tok); // 持有者剛好在這時釋放
+      log2.removeStale({ token: 'judged-old', mtimeMs: 0 }, 'B');
+    });
+  } finally { console.warn = orig; }
+  assert.equal(fs.existsSync(log.lockPath), false);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
+});
+
+test('移除時搬到的是本程序已釋放的鎖：不放回', () => {
+  const log = mkLog();
+  // pid 是自己、token 不在持有清單：一定是孤兒
+  fs.writeFileSync(log.lockPath, JSON.stringify({ pid: process.pid, tid: 0, host: LOCK_HOST, token: 'released' }));
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  try { log.removeStale({ token: 'something-else', mtimeMs: 0 }, 'mine'); } finally { console.warn = orig; }
+  assert.equal(fs.existsSync(log.lockPath), false);
+  assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
 });
 
 test('兩個程序同時搶殘留鎖：臨界區不重疊，兩邊都拿到', async () => {
@@ -246,7 +335,9 @@ test('判定殘留後、移除前鎖被換成新鎖：新鎖不被刪，原持�
   writeStale(log, deadPid());
   const log2 = new OpLog({ dir: log.dir, device: 'd2', deviceName: 'h' });
   log2.lockWaitMs = 300;
-  const fresh = JSON.stringify({ pid: process.pid, host: os.hostname(), token: 'fresh-owner' });
+  const live = livePid();
+  after(() => live.stop());
+  const fresh = JSON.stringify({ pid: live.pid, tid: 0, host: LOCK_HOST, token: 'fresh-owner' });
   let swapped = false;
   log2.onStaleJudged = () => {
     if (swapped) return;
