@@ -386,8 +386,8 @@ test('合併不擴散：checkWidth 不讓 person:白衣客 取代合併前 perso
   s.mergeEntities(SP, ids.小雨, ids.白衣客, '同一人');
   const n = s.oplog.readAll().length;
   assert.throws(() => s.remember(SP, { subjectId: ids.白衣客, predicate: '暗號', objectText: '乙', validFrom: '2026-02-01',
-    audience: `person:${ids.白衣客}`, author: 't', supersedes: [priv] }), /不能用較私下的資訊改動較公開的事實/);
-  assert.throws(() => s.invalidate(SP, priv, '2026-03-01', undefined, `person:${ids.白衣客}`), /不能用較私下的資訊改動較公開的事實/);
+    audience: `person:${ids.白衣客}`, author: 't', supersedes: [priv] }), /不能用另一人的私下資訊改動這條事實/);
+  assert.throws(() => s.invalidate(SP, priv, '2026-03-01', undefined, `person:${ids.白衣客}`), /不能用另一人的私下資訊改動這條事實/);
   assert.equal(s.oplog.readAll().length, n);
   // 正控制：同一個標籤可以取代
   s.remember(SP, { subjectId: ids.白衣客, predicate: '暗號', objectText: '丙', validFrom: '2026-02-01',

@@ -36,6 +36,8 @@ export class Hlc {
   now() {
     const wall = Date.now();
     if (wall > this.ms) { this.ms = wall; this.counter = 0; } else { this.counter++; }
+    // 計數只有四位：同一毫秒用完 9999 就借下一毫秒，計數歸零
+    if (this.counter > 9999) { this.ms++; this.counter = 0; }
     return this.#fmt();
   }
   observe(remote) {

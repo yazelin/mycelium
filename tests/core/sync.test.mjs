@@ -209,3 +209,32 @@ test('fetch 階段不持鎖：onFetched 回呼裡另一個 Store 可寫入', asy
   } });
   assert.equal(wrote, true);
 });
+
+test('遠端追蹤分支已存在但與遠端沒有共同歷史（上次第一次同步失敗）：仍能合併', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-'));
+  const bare = path.join(root, 'r.git');
+  git(root, 'init', '--bare', '-q', bare);
+  // 乙先推上一段自己的歷史（初始化 commit 換個時間，不跟甲的撞成同一個 commit）
+  process.env.GIT_AUTHOR_DATE = process.env.GIT_COMMITTER_DATE = '2020-01-01T00:00:00Z';
+  let b;
+  try { b = openStore({ dbPath: path.join(root, 'b.db'), opsDir: path.join(root, 'b-ops') }); } finally {
+    delete process.env.GIT_AUTHOR_DATE; delete process.env.GIT_COMMITTER_DATE;
+  }
+  git(b.oplog.dir, 'remote', 'add', 'origin', bare);
+  b.createSpace({ id: SP, name: '示範', kind: 'story', timeAxis: 'chapter' });
+  b.upsertEntity(SP, { type: 'person', name: '城主' });
+  await sync(b, { branch: 'main', requirePrivate: false });
+  // 甲是另一份獨立歷史；遠端追蹤分支殘留（指向甲自己的 commit），看起來像「已同步過」
+  const a = openStore({ dbPath: path.join(root, 'a.db'), opsDir: path.join(root, 'a-ops') });
+  git(a.oplog.dir, 'remote', 'add', 'origin', bare);
+  a.upsertEntity(SP, { type: 'person', name: '林小雨' });
+  git(a.oplog.dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  // 前提：甲與遠端確實沒有共同歷史
+  const remoteHead = git(bare, 'rev-parse', 'main').trim();
+  git(a.oplog.dir, 'fetch', '-q', bare, 'main:refs/check/remote');
+  assert.throws(() => git(a.oplog.dir, 'merge-base', 'HEAD', remoteHead));
+  git(a.oplog.dir, 'update-ref', '-d', 'refs/check/remote');
+  await sync(a, { branch: 'main', requirePrivate: false });
+  const names = a.db.prepare('SELECT name FROM entities ORDER BY name').all().map((r) => r.name);
+  assert.deepEqual(names.sort(), ['城主', '林小雨'].sort());
+});

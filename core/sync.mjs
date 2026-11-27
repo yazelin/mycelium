@@ -41,15 +41,12 @@ export async function sync(store, { remote = 'origin', branch = 'main', requireP
     if ((await checkPrivate(url)) !== true) throw new Error('遠端不是 private repo，拒絕推送');
   }
   // 網路抓取在鎖外做，不讓慢網路卡住 MCP 寫入；提交、合併、補套在鎖內；推送不佔鎖。
-  // fetch 會順便建立遠端追蹤分支，所以「是不是第一次」要在 fetch 前判斷
-  let firstSync = false;
-  try { git(dir, ['rev-parse', '-q', '--verify', `refs/remotes/${remote}/${branch}`]); } catch { firstSync = true; }
   const fetched = fetchRemote(dir, remote, branch); // 唯一 ref 名稱，抓不到分支時為 null
   if (onFetched) onFetched();
   const locked = store.locked ?? ((fn) => fn());
   let out;
   try {
-    out = locked(() => pullAndApply(store, dir, remote, branch, fetched, firstSync));
+    out = locked(() => pullAndApply(store, dir, fetched));
   } finally {
     if (fetched) { try { git(dir, ['update-ref', '-d', fetched]); } catch { /* 清不掉不影響結果 */ } }
   }
@@ -71,7 +68,7 @@ function fetchRemote(dir, remote, branch) {
   }
 }
 
-function pullAndApply(store, dir, remote, branch, fetched, firstSync) {
+function pullAndApply(store, dir, fetched) {
   const id = store.oplog.identity?.length ? store.oplog.identity : gitIdentityArgs(dir); // 合併 commit 也要身分
   store.oplog.touchLock?.();
   // 自己尚未提交的操作檔先提交，merge 才不會被未提交變更擋住
@@ -80,9 +77,12 @@ function pullAndApply(store, dir, remote, branch, fetched, firstSync) {
     git(dir, [...id, 'commit', '-q', '-m', 'sync：提交本機操作']);
   }
   if (fetched) {
-    // 只有第一次同步才允許無共同歷史的合併
+    // 本機與抓到的分支還沒有共同祖先（第一次同步，或上次第一次合併沒成功）才允許無共同歷史的合併；
+    // 不看遠端追蹤分支，它在 fetch 時就會被建立，不代表合併過
+    let unrelated = false;
+    try { git(dir, ['merge-base', 'HEAD', fetched]); } catch { unrelated = true; }
     try {
-      git(dir, [...id, 'merge', '--no-edit', '-q', ...(firstSync ? ['--allow-unrelated-histories'] : []), fetched]);
+      git(dir, [...id, 'merge', '--no-edit', '-q', ...(unrelated ? ['--allow-unrelated-histories'] : []), fetched]);
     } catch (e) {
       throw new Error(`git pull 失敗：${errText(e)}`);
     }

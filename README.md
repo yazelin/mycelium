@@ -90,7 +90,7 @@ npx github:yazelin/mycelium sync
 
 ### English summary
 
-The memory core is a zero-dependency (Node 22.13+) relational memory for AI agents: people, events and things, with relations that change over time. Everything stays on your own machine, in a SQLite cache rebuilt from append-only JSONL operation logs. Each device appends only to its own `ops/<device>.jsonl`, so syncing through git never conflicts. Facts carry an `audience` label (`public`, `person:<id>`, `group:`, `role:`), and recall requires the caller's audiences. A narrower audience can never supersede or invalidate a broader fact (only the same audience or `public` can). Entity names, summaries and merges are treated as public. Run it with `npx github:yazelin/mycelium <command>` and connect Claude Code with `claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp`.
+The memory core is a zero-dependency (Node 22.13+) relational memory for AI agents: people, events and things, with relations that change over time. Everything stays on your own machine, in a SQLite cache rebuilt from append-only JSONL operation logs. Each device appends only to its own `ops/<device>.jsonl`, so syncing through git never conflicts. Facts carry an `audience` label (`public`, `person:<id>`, `group:`, `role:`), and recall requires the caller's audiences. A narrower audience can never supersede or invalidate a broader fact (only the same audience or `public` can). `person:` labels match exactly and do not follow merges; use the id bound to the handle. Entity names, summaries and merges are treated as public. Run it with `npx github:yazelin/mycelium <command>` and connect Claude Code with `claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp`.
 
 ---
 

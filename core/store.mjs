@@ -189,6 +189,9 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
     const f = get('SELECT audience FROM facts WHERE id = ? AND space = ?', factId ?? null, space ?? null);
     if (!f) throw new Error(`找不到事實：${factId}`);
     if (writeAud === 'public' || writeAud === f.audience) return;
+    if (writeAud.startsWith('person:') && f.audience.startsWith('person:')) {
+      throw new Error(`不能用另一人的私下資訊改動這條事實：${factId}（${f.audience}）`);
+    }
     throw new Error(`不能用較私下的資訊改動較公開的事實：${factId}（${f.audience}）`);
   };
 

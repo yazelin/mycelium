@@ -96,3 +96,20 @@ test('Hlc.observe：遠端時間超過現在＋1 天只推進到現在＋1 天�
   new Hlc('dev3').observe(near); // 一天內照常推進、不 warn
   assert.equal(warn.mock.calls.length, 1);
 });
+
+test('Hlc 同一毫秒連續 10001 次 now()：計數到 9999 後進位到下一毫秒，格式都合法且遞增', async () => {
+  const { isValidOp } = await import('../../core/store.mjs');
+  const h = new Hlc('DEV');
+  const realNow = Date.now;
+  Date.now = () => 1700000000000; // 時鐘停住
+  let prev = '';
+  try {
+    for (let i = 0; i < 10001; i++) {
+      const t = h.now();
+      assert.ok(isValidOp({ id: 'x', hlc: t, type: 'note' }), `第 ${i} 次格式不合：${t}`);
+      assert.ok(t > prev, `第 ${i} 次沒有遞增：${prev} ${t}`);
+      prev = t;
+    }
+  } finally { Date.now = realNow; }
+  assert.equal(prev, '1700000000001-0000-DEV');
+});

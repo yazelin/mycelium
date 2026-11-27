@@ -349,3 +349,49 @@ test('判定殘留後、移除前鎖被換成新鎖：新鎖不被刪，原持�
   assert.equal(fs.readFileSync(log.lockPath, 'utf8'), fresh);
   assert.equal(fs.readdirSync(log.dir).some((f) => f.includes('.lock.stale-')), false);
 });
+
+test('Windows：openSync 遇 EPERM／EACCES 視為暫時性，重試後取得鎖', () => {
+  const log = mkLog();
+  const realOpen = fs.openSync;
+  const plat = Object.getOwnPropertyDescriptor(process, 'platform');
+  let fails = 0;
+  fs.openSync = (p, ...rest) => {
+    if (p === log.lockPath && fails < 3) {
+      fails++;
+      const e = new Error('模擬'); e.code = fails % 2 ? 'EPERM' : 'EACCES'; throw e;
+    }
+    return realOpen(p, ...rest);
+  };
+  Object.defineProperty(process, 'platform', { ...plat, value: 'win32' });
+  let got = false;
+  try { log.withLock(() => { got = true; }); } finally {
+    fs.openSync = realOpen;
+    Object.defineProperty(process, 'platform', plat);
+  }
+  assert.equal(got, true);
+  assert.equal(fails, 3);
+});
+
+test('非 Windows 的 EPERM 照丟', () => {
+  const log = mkLog();
+  const realOpen = fs.openSync;
+  fs.openSync = (p, ...rest) => {
+    if (p === log.lockPath) { const e = new Error('模擬'); e.code = 'EPERM'; throw e; }
+    return realOpen(p, ...rest);
+  };
+  try { assert.throws(() => log.withLock(() => {}), (e) => e.code === 'EPERM'); } finally { fs.openSync = realOpen; }
+});
+
+test('殘留鎖搬不走（非 ENOENT）：同一把鎖只警告一次', () => {
+  const log = mkLog();
+  writeStale(log, deadPid());
+  log.lockWaitMs = 400;
+  const realRename = fs.renameSync;
+  fs.renameSync = (from, ...rest) => {
+    if (from === log.lockPath) { const e = new Error('模擬'); e.code = 'EBUSY'; throw e; }
+    return realRename(from, ...rest);
+  };
+  const warns = []; const orig = console.warn; console.warn = (m) => warns.push(m);
+  try { assert.throws(() => log.withLock(() => {}), /等不到/); } finally { fs.renameSync = realRename; console.warn = orig; }
+  assert.equal(warns.filter((w) => w.includes('無法移除殘留的鎖檔')).length, 1);
+});
