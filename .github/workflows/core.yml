@@ -1,0 +1,32 @@
+name: core
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # 測試會建立 git commit，需要身分。
+      - name: 設定 git 身分
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.com"
+      # 零依賴，不需要 npm ci。用 bash 確保 Windows 上引號內的 glob 也照常運作。
+      - name: 記憶核心測試
+        shell: bash
+        run: npm run test:core
+      - name: CLI 冒煙測試
+        shell: bash
+        run: node bin/mycelium.mjs init --space demo --name 示範 --kind story --axis chapter --db tmp/t.db --ops tmp/ops

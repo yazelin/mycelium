@@ -1,13 +1,92 @@
 # mycelium
 
-一個 **agent skill** ＋ 一個 **敘事效果庫**。都是零依賴、沒有 build 步驟。
+一個 **記憶核心**（人、事、物關聯記憶）＋ 一個 **agent skill**（小說設定管理）＋ 一個 **敘事效果庫**。都是零依賴、沒有 build 步驟。
 
 菌絲網路連結整片森林裡的樹；mycelium 連結你多部作品各自的設定資料網。
 
 | | 是什麼 | 給誰 |
 |---|---|---|
+| 記憶核心（下方） | 人、事、物關聯記憶，MCP／CLI | 任何 AI agent |
 | [`skills/mycelium/`](skills/mycelium/SKILL.md) | 長篇小說的設定管理，全部在終端機對話裡完成 | 寫長篇的人 ＋ 他的 agent |
 | [`effects/`](https://yazelin.github.io/mycelium/) | 捲動驅動的敘事效果庫（`mycelium-fx`） | 在網頁上連載小說的人 |
+
+---
+
+## 記憶核心：人、事、物的關聯記憶
+
+給 AI agent 用的關聯記憶：記人、事、物，以及它們之間隨時間變化的關係。資料全部留在自己的電腦上，不需要伺服器，也不需要雲端帳號。零 npm 依賴，需要 Node 22.13 以上，Windows、macOS、Linux 都測試過。
+
+### 安裝與執行
+
+不用先安裝，直接用 `npx` 跑：
+
+```bash
+npx github:yazelin/mycelium init --space demo --name 示範 --kind story --axis chapter
+```
+
+接上 Claude Code：
+
+```bash
+claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp
+```
+
+### 資料放哪
+
+- 資料庫：`~/.mycelium/mycelium.db`（SQLite，可隨時重建）
+- 操作紀錄：`~/.mycelium/ops/`（真正的主本，每行一筆 JSON）
+- 想換位置，設環境變數 `MYCELIUM_DB`、`MYCELIUM_OPS`，或用 `--db`、`--ops` 選項
+
+### 指令
+
+| 指令 | 作用 |
+|---|---|
+| `init --space <id> --name <名> --kind social\|story --axis date\|chapter` | 建立一個記憶空間 |
+| `mcp` | 啟動 MCP server（stdio），給 agent 連線 |
+| `export --space <id>` | 把該空間的操作以 JSONL 印出 |
+| `sync` | 與 git 遠端同步操作紀錄 |
+| `rebuild` | 從操作紀錄重建 SQLite 資料庫 |
+
+`sync` 可加 `--require-private`：遠端不是 private repo 就拒絕推送。這個檢查只認得 GitHub 遠端，並且要先用 `gh auth login` 登入；其他主機一律拒絕。
+
+### 同步怎麼運作
+
+每台裝置只往自己的 `ops/<主機名>-<裝置id>.jsonl` 追加一行行操作，不改別台的檔案，所以多台裝置用 git 同步時不會有衝突。`sync` 會拉回別台的新操作並重播進資料庫。SQLite 只是從操作紀錄算出來的快取，資料庫遺失或損壞時才需要 `rebuild`；程式更新後資料庫格式版本不同時，開啟時會自動清空重建。取代事實時，舊的標成失效而不刪除；也不會自動合併人物。
+
+多個 Claude Code 各起一個 MCP server、再加上命令列 `sync`，可以同時用同一份記憶：寫入在 `ops/.lock` 這把鎖內排隊，寫入前會先讀進別的程序寫下的操作。沒有設定 git 身分（`user.name`／`user.email`）時，自動提交改用 `mycelium <mycelium@localhost>`。
+
+寫入前會先驗證：章節軸的時間必須在章節清單裡，日期軸必須是 `YYYY-MM-DD` 或完整 ISO 時間；已被事實或紀錄用到的章節不能從清單移除。新建人物時 `type` 與 `name` 必填。
+
+第一次同步前要先做兩件事。`~/.mycelium/ops` 會自動初始化成本機 git repo，但沒有遠端，`sync` 固定與遠端 `origin` 的 `main` 分支交換：
+
+```bash
+# 先在 GitHub 建一個 private repo（空的即可），再把它設成 origin
+git -C ~/.mycelium/ops remote add origin <private repo 網址>
+npx github:yazelin/mycelium sync --require-private
+```
+
+本機分支叫什麼都可以，推送一律是 `HEAD:main`。第二台裝置用同樣的兩行指令加入同一個遠端。
+
+### 可見範圍
+
+每筆紀錄帶一個 `audience` 標籤：
+
+- `public`：任何人都看得到
+- `person:<id>`：只有該人物的視角看得到
+- `group:<名稱>`、`role:<名稱>`：給群組或角色
+
+查詢（recall）時，呼叫者必須帶上自己能看哪些標籤（audiences），紀錄的標籤在其中才會回傳。輸出的事實若指向看不到的紀錄（`superseded_by`、`source_episode`、`object_fact`），該欄位會清成 null。
+
+寫入時也照可見範圍：
+
+- `remember` 回傳的同類仍成立事實，只列公開的、或與這次寫入同一範圍的。
+- `upsert_entity` 可帶 `audiences`（預設 `['public']`），找重複候選時只比對看得到的別名。
+- 較私下的資訊不能改動較公開的事實：寫入範圍與舊事實相同，或寫入範圍是 `public`，才能用 `supersedes` 取代或用 `invalidate` 讓它失效。`invalidate` 可帶 `audience`（預設 `public`）說明這次根據的資訊來自哪裡。
+
+已知限制：人物名稱、摘要與合併視為公開資訊。私下得知的同一人關係，請用 `person:` 標籤的事實來記，不要寫進人物摘要或合併。
+
+### English summary
+
+The memory core is a zero-dependency (Node 22.13+) relational memory for AI agents: people, events and things, with relations that change over time. Everything stays on your own machine, in a SQLite cache rebuilt from append-only JSONL operation logs. Each device appends only to its own `ops/<device>.jsonl`, so syncing through git never conflicts. Facts carry an `audience` label (`public`, `person:<id>`, `group:`, `role:`), and recall requires the caller's audiences. A narrower audience can never supersede or invalidate a broader fact (only the same audience or `public` can). Entity names, summaries and merges are treated as public. Run it with `npx github:yazelin/mycelium <command>` and connect Claude Code with `claude mcp add mycelium -- npx -y github:yazelin/mycelium mcp`.
 
 ---
 

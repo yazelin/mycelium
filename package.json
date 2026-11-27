@@ -6,9 +6,16 @@
   "scripts": {
     "test": "playwright test",
     "test:skill": "node --test skills/mycelium/tests/*.test.mjs",
-    "serve": "python3 -m http.server 8919"
+    "serve": "python3 -m http.server 8919",
+    "test:core": "node --test \"tests/core/*.test.mjs\""
   },
   "devDependencies": {
     "@playwright/test": "^1.54.1"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "bin": {
+    "mycelium": "bin/mycelium.mjs"
   }
 }
