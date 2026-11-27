@@ -184,14 +184,11 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
     return cur; // 迴圈（理論上不會發生）：停在重複處
   };
 
-  // person: 標籤先經 resolve 再比，合併後的人仍對得上合併前的標籤。
-  const normAud = (a) => (typeof a === 'string' && a.startsWith('person:') ? `person:${resolve(a.slice(7))}` : a);
-
-  // 寫入範圍 W 只能取代或讓範圍 T 的事實失效，當 W === T（person: resolve 後比）或 W 是 public。
+  // 寫入範圍 W 只能取代或讓範圍 T 的事實失效，當 W === T（字串完全相同，不經 resolve）或 W 是 public。
   const checkWidth = (space, writeAud, factId) => {
     const f = get('SELECT audience FROM facts WHERE id = ? AND space = ?', factId ?? null, space ?? null);
     if (!f) throw new Error(`找不到事實：${factId}`);
-    if (writeAud === 'public' || normAud(writeAud) === normAud(f.audience)) return;
+    if (writeAud === 'public' || writeAud === f.audience) return;
     throw new Error(`不能用較私下的資訊改動較公開的事實：${factId}（${f.audience}）`);
   };
 
@@ -237,7 +234,7 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
       if (name == null || name === '') throw new Error('新建人物時 name 必填');
       if (!Array.isArray(audiences) || audiences.length === 0) throw new Error('audiences 要是非空陣列');
       for (const a of audiences) checkAudience(a);
-      const allowed = new Set(audiences.map(normAud));
+      const allowed = new Set(audiences);
       // 建立前先找可能重複的人物（名稱、看得到的別名、全文）
       const key = nameKey(name);
       const found = new Map();
@@ -246,7 +243,7 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
         if (nameKey(e.name) === key) add(e.id, e.name, 'name');
       }
       for (const a of all_('SELECT entity_id, alias, audience FROM aliases WHERE space = ? AND alias_key = ?', space, key)) {
-        if (!allowed.has(normAud(a.audience))) continue;
+        if (!allowed.has(a.audience)) continue;
         const e = get('SELECT name FROM entities WHERE id = ?', a.entity_id);
         add(a.entity_id, e?.name ?? a.alias, 'alias');
       }
@@ -306,13 +303,12 @@ export function openStore({ dbPath, opsDir, autoCommit = true }) {
       // 先查同類仍成立的事實（不含這一筆本身），寫入後交給呼叫者決定要不要 invalidate。
       // 主體比對用 resolve 後的人；只回傳公開的、或與這次寫入同一可見範圍的事實，避免把私下的事帶進公開場合。
       const subj = resolve(subjectId);
-      const aud = normAud(audience);
       const sameKindActive = all_(
         `SELECT id, subject_id, predicate, object_entity, object_text, object_fact, audience FROM facts
          WHERE space = ? AND predicate = ? AND (valid_to IS NULL OR valid_to = '')`,
         space, predicate ?? null)
         .filter((f) => resolve(f.subject_id) === subj)
-        .filter((f) => f.audience === 'public' || normAud(f.audience) === aud)
+        .filter((f) => f.audience === 'public' || f.audience === audience)
         .filter((f) => !(supersedes ?? []).includes(f.id))
         .map((f) => ({ factId: f.id, predicate: f.predicate,
           object: f.object_entity ?? f.object_text ?? f.object_fact ?? null }));

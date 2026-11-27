@@ -82,6 +82,8 @@ npx github:yazelin/mycelium sync
 - `upsert_entity` 可帶 `audiences`（預設 `['public']`），找重複候選時只比對看得到的別名。
 - 較私下的資訊不能改動較公開的事實：寫入範圍與舊事實相同，或寫入範圍是 `public`，才能用 `supersedes` 取代或用 `invalidate` 讓它失效。`invalidate` 可帶 `audience`（預設 `public`）說明這次根據的資訊來自哪裡。
 
+可見範圍標籤一律字串完全相同才算數，`person:<id>` 的 id 不經合併換算。人物 A 併入 B 之後，`person:A` 的私下紀錄仍只給 `person:A` 看，`person:B` 看不到；公開事實則照常歸到合併後的人物。
+
 已知限制：人物名稱、摘要與合併視為公開資訊。私下得知的同一人關係，請用 `person:` 標籤的事實來記，不要寫進人物摘要或合併。
 
 ### English summary
